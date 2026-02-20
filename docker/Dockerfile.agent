@@ -1,0 +1,22 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    jq \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js (required for Claude Code CLI)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
+
+RUN useradd -m -s /bin/bash agent
+USER agent
+WORKDIR /home/agent/workspace
+
+ENTRYPOINT ["claude"]
