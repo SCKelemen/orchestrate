@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/SCKelemen/clix/v2"
 	"github.com/SCKelemen/orchestrate/internal/agent"
@@ -61,12 +62,16 @@ func newServerCmd() *clix.Command {
 			data, err := os.ReadFile(tokenPath)
 			if err != nil {
 				b := make([]byte, 32)
-				rand.Read(b)
+				if _, err := rand.Read(b); err != nil {
+					return fmt.Errorf("generate auth token: %w", err)
+				}
 				token = hex.EncodeToString(b)
-				os.WriteFile(tokenPath, []byte(token), 0o600)
+				if err := os.WriteFile(tokenPath, []byte(token), 0o600); err != nil {
+					return fmt.Errorf("write auth token: %w", err)
+				}
 				logger.Info("generated auth token", "path", tokenPath)
 			} else {
-				token = string(data)
+				token = strings.TrimSpace(string(data))
 			}
 		}
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -142,11 +144,15 @@ func (s *Server) handleBearerTokenExchange(w http.ResponseWriter, r *http.Reques
 	fakeReq, _ := http.NewRequest("GET", "/", nil)
 	fakeReq.Header.Set("Authorization", "Bearer "+req.Token)
 
-	// Try to authenticate with the bearer provider via the middleware chain
-	// For bearer exchange, we construct an identity directly
-	id := &auth.Identity{
-		UserID:   "bearer",
-		Provider: "bearer",
+	// Authenticate through configured providers.
+	id, err := s.auth.Authenticate(fakeReq)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid bearer token")
+		return
+	}
+	if id == nil || id.Provider != "bearer" {
+		writeError(w, http.StatusUnauthorized, "invalid bearer token")
+		return
 	}
 
 	resp, err := s.issueTokenPair(r, id)
@@ -365,11 +371,13 @@ func (s *Server) ensureExternalUser(r *http.Request, provider, externalID, displ
 		}
 		if user != nil {
 			// Link credential to existing user
-			s.store.CreateCredential(ctx, newID(), store.CreateCredentialParams{
+			if _, err := s.store.CreateCredential(ctx, newID(), store.CreateCredentialParams{
 				UserID:         user.ID,
 				CredentialType: provider,
 				ExternalID:     externalID,
-			})
+			}); err != nil {
+				return nil, err
+			}
 			return &auth.Identity{
 				UserID:      user.ID,
 				DisplayName: user.DisplayName,
@@ -388,11 +396,13 @@ func (s *Server) ensureExternalUser(r *http.Request, provider, externalID, displ
 	if err != nil {
 		return nil, err
 	}
-	s.store.CreateCredential(ctx, newID(), store.CreateCredentialParams{
+	if _, err := s.store.CreateCredential(ctx, newID(), store.CreateCredentialParams{
 		UserID:         user.ID,
 		CredentialType: provider,
 		ExternalID:     externalID,
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	return &auth.Identity{
 		UserID:      user.ID,
@@ -418,14 +428,16 @@ func (s *Server) issueTokenPair(r *http.Request, id *auth.Identity) (*tokenRespo
 
 	// Record session
 	expiresAt := time.Now().Add(auth.RefreshTokenLifetime).Format(time.RFC3339)
-	s.store.CreateSession(r.Context(), newID(), store.CreateSessionParams{
+	if _, err := s.store.CreateSession(r.Context(), newID(), store.CreateSessionParams{
 		UserID:       id.UserID,
 		RefreshToken: refreshToken,
 		Provider:     id.Provider,
 		IPAddress:    r.RemoteAddr,
 		UserAgent:    r.UserAgent(),
 		ExpiresAt:    expiresAt,
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	return &tokenResponse{
 		AccessToken:  accessToken,
@@ -712,6 +724,7 @@ func (s *Server) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Request, r
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
+
 // handleAuthorizePage renders a minimal login form.
 // GET /v1/auth/authorize?response_type=code&client_id=...&redirect_uri=...&code_challenge=...&code_challenge_method=S256&state=...
 func (s *Server) handleAuthorizePage(w http.ResponseWriter, r *http.Request) {
@@ -771,6 +784,14 @@ func (s *Server) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if redirectURI == "" {
 		writeError(w, http.StatusBadRequest, "redirect_uri is required")
+		return
+	}
+	if clientID == "" {
+		writeError(w, http.StatusBadRequest, "client_id is required")
+		return
+	}
+	if err := validateRedirectURI(redirectURI); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid redirect_uri: "+err.Error())
 		return
 	}
 	if codeChallengeMethod != "S256" {
@@ -844,6 +865,14 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, req
 		writeError(w, http.StatusBadRequest, "code_verifier is required")
 		return
 	}
+	if req.RedirectURI == "" {
+		writeError(w, http.StatusBadRequest, "redirect_uri is required")
+		return
+	}
+	if req.ClientID == "" {
+		writeError(w, http.StatusBadRequest, "client_id is required")
+		return
+	}
 
 	ctx := r.Context()
 	ac, err := s.store.GetAuthCode(ctx, req.Code)
@@ -865,8 +894,12 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, req
 		return
 	}
 
-	// Verify redirect_uri matches
-	if req.RedirectURI != "" && req.RedirectURI != ac.RedirectURI {
+	// Verify client and redirect URI match the authorization request.
+	if req.ClientID != ac.ClientID {
+		writeError(w, http.StatusBadRequest, "client_id mismatch")
+		return
+	}
+	if req.RedirectURI != ac.RedirectURI {
 		writeError(w, http.StatusBadRequest, "redirect_uri mismatch")
 		return
 	}
@@ -902,6 +935,7 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, req
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
 // handleCIBAInitiate starts a CIBA backchannel authentication request.
 // POST /v1/auth/ciba
 // OpenID Connect CIBA Section 7 - Authentication Request
@@ -1126,6 +1160,7 @@ func (s *Server) fireCIBAWebhook(webhookURL, authReqID, loginHint, bindingMsg st
 	}
 	resp.Body.Close()
 }
+
 // handleWebAuthnRegister dispatches WebAuthn registration ceremony actions.
 // POST /v1/auth/webauthn/register/:begin and :finish
 func (s *Server) handleWebAuthnRegister(w http.ResponseWriter, r *http.Request) {
@@ -1365,6 +1400,10 @@ func toUserResponse(u *store.User) userResponse {
 }
 
 func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
+	if !isAdminIdentity(auth.FromContext(r.Context())) {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	var req createUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -1384,6 +1423,10 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
+	if !isAdminIdentity(auth.FromContext(r.Context())) {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	q := r.URL.Query()
 	pageSize := 20
 	if ps := q.Get("pageSize"); ps != "" {
@@ -1419,6 +1462,10 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
+	if !isAdminIdentity(auth.FromContext(r.Context())) {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	id := r.PathValue("user")
 	user, err := s.store.GetUser(r.Context(), id)
 	if err != nil {
@@ -1434,6 +1481,10 @@ func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
+	if !isAdminIdentity(auth.FromContext(r.Context())) {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	id := r.PathValue("user")
 	var req struct {
 		DisplayName *string `json:"displayName"`
@@ -1457,10 +1508,40 @@ func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
+	if !isAdminIdentity(auth.FromContext(r.Context())) {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	id := r.PathValue("user")
 	if err := s.store.DeleteUser(r.Context(), id); err != nil {
 		writeError(w, http.StatusNotFound, "user not found: "+id)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func isAdminIdentity(id *auth.Identity) bool {
+	// Current policy: static bearer identity is admin.
+	return id != nil && id.Provider == "bearer"
+}
+
+func validateRedirectURI(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("scheme must be http or https")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("host is required")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("host is required")
+	}
+	if u.Scheme == "http" && host != "localhost" && net.ParseIP(host) == nil {
+		return fmt.Errorf("http redirect_uri must be localhost or IP")
+	}
+	return nil
 }

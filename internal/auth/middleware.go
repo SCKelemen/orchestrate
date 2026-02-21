@@ -44,26 +44,39 @@ func (m *Middleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Try each provider in order
-		for _, p := range m.providers {
-			id, err := p.Authenticate(r)
-			if err != nil {
-				// Provider recognized the request but it was invalid
-				writeAuthError(w, http.StatusUnauthorized, "unauthorized")
-				return
-			}
-			if id != nil {
-				// Authenticated; inject identity into context
-				ctx := WithIdentity(r.Context(), id)
-				next(w, r.WithContext(ctx))
-				return
-			}
-			// (nil, nil) = not my request, try next
+		// Try each provider in order.
+		id, err := m.Authenticate(r)
+		if err != nil {
+			writeAuthError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if id != nil {
+			// Authenticated; inject identity into context
+			ctx := WithIdentity(r.Context(), id)
+			next(w, r.WithContext(ctx))
+			return
 		}
 
 		// No provider matched
 		writeAuthError(w, http.StatusUnauthorized, "unauthorized")
 	}
+}
+
+// Authenticate runs the provider chain and returns the first successful identity.
+// Returns (nil, nil) when no provider recognizes the request.
+func (m *Middleware) Authenticate(r *http.Request) (*Identity, error) {
+	for _, p := range m.providers {
+		id, err := p.Authenticate(r)
+		if err != nil {
+			// Provider recognized the request but it was invalid.
+			return nil, err
+		}
+		if id != nil {
+			return id, nil
+		}
+		// (nil, nil) = not my request, try next
+	}
+	return nil, nil
 }
 
 func writeAuthError(w http.ResponseWriter, code int, msg string) {

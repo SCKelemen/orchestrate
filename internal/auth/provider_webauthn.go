@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
@@ -99,6 +100,7 @@ func UnmarshalCredential(data []byte) (*webauthn.Credential, error) {
 // WebAuthnSessionStore provides in-memory storage for WebAuthn ceremony sessions.
 // Sessions are short-lived (ceremony duration) and don't need persistence.
 type WebAuthnSessionStore struct {
+	mu       sync.Mutex
 	sessions map[string]*webauthnSessionEntry
 }
 
@@ -116,6 +118,8 @@ func NewWebAuthnSessionStore() *WebAuthnSessionStore {
 
 // Save stores a WebAuthn session with a 5-minute expiry.
 func (s *WebAuthnSessionStore) Save(key string, data *webauthn.SessionData) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.sessions[key] = &webauthnSessionEntry{
 		data:      data,
 		expiresAt: time.Now().Add(5 * time.Minute),
@@ -124,6 +128,8 @@ func (s *WebAuthnSessionStore) Save(key string, data *webauthn.SessionData) {
 
 // Get retrieves and removes a WebAuthn session.
 func (s *WebAuthnSessionStore) Get(key string) (*webauthn.SessionData, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entry, ok := s.sessions[key]
 	if !ok {
 		return nil, false
