@@ -80,7 +80,14 @@ func newID() string {
 	b[3] = byte(ts >> 16)
 	b[4] = byte(ts >> 8)
 	b[5] = byte(ts)
-	rand.Read(b[6:])
+	if _, err := rand.Read(b[6:]); err != nil {
+		// Fall back to timestamp-derived bytes if CSPRNG is unavailable.
+		ns := time.Now().UnixNano()
+		for i := 6; i < len(b); i++ {
+			shift := uint((i - 6) * 8)
+			b[i] = byte(ns >> shift)
+		}
+	}
 	return hex.EncodeToString(b)
 }
 

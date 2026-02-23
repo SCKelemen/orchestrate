@@ -302,7 +302,10 @@ func loginWithBrowser(ctx *clix.Context, cc *ClientConfig) error {
 		return fmt.Errorf("generate code verifier: %w", err)
 	}
 	challenge := auth.CodeChallengeS256(verifier)
-	state := newRandomState()
+	state, err := newRandomState()
+	if err != nil {
+		return fmt.Errorf("generate oauth state: %w", err)
+	}
 
 	// Start loopback server on random port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -526,10 +529,12 @@ func loginWithDevice(ctx *clix.Context, cc *ClientConfig) error {
 	return fmt.Errorf("device code expired")
 }
 
-func newRandomState() string {
+func newRandomState() (string, error) {
 	b := make([]byte, 16)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", b), nil
 }
 
 func openBrowser(url string) {

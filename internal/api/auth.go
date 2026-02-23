@@ -546,7 +546,12 @@ func (s *Server) handleDevicePoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check expiry
-	expiresAt, _ := time.Parse(time.RFC3339, dc.ExpiresAt)
+	expiresAt, err := time.Parse(time.RFC3339, dc.ExpiresAt)
+	if err != nil {
+		s.logger.Error("parse device code expiry", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	if time.Now().After(expiresAt) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expired_token"})
 		return
@@ -632,7 +637,12 @@ func (s *Server) handleDeviceVerifySubmit(w http.ResponseWriter, r *http.Request
 	}
 
 	// Check expiry
-	expiresAt, _ := time.Parse(time.RFC3339, dc.ExpiresAt)
+	expiresAt, err := time.Parse(time.RFC3339, dc.ExpiresAt)
+	if err != nil {
+		s.logger.Error("parse device code expiry", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	if time.Now().After(expiresAt) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Code Expired</h2><p>This code has expired. Please request a new one.</p></body></html>`)
@@ -689,7 +699,12 @@ func (s *Server) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 
-	expiresAt, _ := time.Parse(time.RFC3339, dc.ExpiresAt)
+	expiresAt, err := time.Parse(time.RFC3339, dc.ExpiresAt)
+	if err != nil {
+		s.logger.Error("parse device code expiry", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	if time.Now().After(expiresAt) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expired_token"})
 		return
@@ -842,16 +857,19 @@ func (s *Server) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Redirect with code
-	sep := "?"
-	if len(redirectURI) > 0 && redirectURI[len(redirectURI)-1] == '?' {
-		sep = ""
+	// Redirect with code/state via proper URL query encoding.
+	redirectURL, err := url.Parse(redirectURI)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid redirect_uri")
+		return
 	}
-	location := redirectURI + sep + "code=" + code
+	query := redirectURL.Query()
+	query.Set("code", code)
 	if state != "" {
-		location += "&state=" + state
+		query.Set("state", state)
 	}
-	http.Redirect(w, r, location, http.StatusFound)
+	redirectURL.RawQuery = query.Encode()
+	http.Redirect(w, r, redirectURL.String(), http.StatusFound)
 }
 
 // handleAuthCodeGrant exchanges an authorization code + PKCE verifier for tokens.
@@ -1038,7 +1056,12 @@ func (s *Server) handleCIBAPoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expiresAt, _ := time.Parse(time.RFC3339, cr.ExpiresAt)
+	expiresAt, err := time.Parse(time.RFC3339, cr.ExpiresAt)
+	if err != nil {
+		s.logger.Error("parse ciba request expiry", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	if time.Now().After(expiresAt) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expired_token"})
 		return
@@ -1117,7 +1140,12 @@ func (s *Server) handleCIBAGrant(w http.ResponseWriter, r *http.Request, req *to
 		return
 	}
 
-	expiresAt, _ := time.Parse(time.RFC3339, cr.ExpiresAt)
+	expiresAt, err := time.Parse(time.RFC3339, cr.ExpiresAt)
+	if err != nil {
+		s.logger.Error("parse ciba request expiry", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	if time.Now().After(expiresAt) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expired_token"})
 		return
@@ -1213,7 +1241,12 @@ func (s *Server) handleWebAuthnRegisterBegin(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Build WebAuthn user with existing credentials
-	wanUser := s.buildWebAuthnUser(r.Context(), user)
+	wanUser, err := s.buildWebAuthnUser(r.Context(), user)
+	if err != nil {
+		s.logger.Error("build webauthn user", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load credentials")
+		return
+	}
 
 	creation, session, err := s.webauthn.BeginRegistration(wanUser)
 	if err != nil {
@@ -1247,7 +1280,12 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	wanUser := s.buildWebAuthnUser(r.Context(), user)
+	wanUser, err := s.buildWebAuthnUser(r.Context(), user)
+	if err != nil {
+		s.logger.Error("build webauthn user", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load credentials")
+		return
+	}
 
 	cred, err := s.webauthn.FinishRegistration(wanUser, *session, r)
 	if err != nil {
@@ -1257,13 +1295,22 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 	}
 
 	// Store the credential
-	credJSON, _ := auth.MarshalCredential(cred)
-	s.store.CreateCredential(r.Context(), newID(), store.CreateCredentialParams{
+	credJSON, err := auth.MarshalCredential(cred)
+	if err != nil {
+		s.logger.Error("marshal webauthn credential", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to store credential")
+		return
+	}
+	if _, err := s.store.CreateCredential(r.Context(), newID(), store.CreateCredentialParams{
 		UserID:         id.UserID,
 		CredentialType: "webauthn",
 		ExternalID:     fmt.Sprintf("%x", cred.ID),
 		PublicKey:      credJSON,
-	})
+	}); err != nil {
+		s.logger.Error("store webauthn credential", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to store credential")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "registered"})
 }
@@ -1287,7 +1334,12 @@ func (s *Server) handleWebAuthnLoginBegin(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	wanUser := s.buildWebAuthnUser(r.Context(), user)
+	wanUser, err := s.buildWebAuthnUser(r.Context(), user)
+	if err != nil {
+		s.logger.Error("build webauthn user", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load credentials")
+		return
+	}
 	if len(wanUser.Credentials) == 0 {
 		writeError(w, http.StatusBadRequest, "no webauthn credentials registered")
 		return
@@ -1327,7 +1379,12 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	wanUser := s.buildWebAuthnUser(r.Context(), user)
+	wanUser, err := s.buildWebAuthnUser(r.Context(), user)
+	if err != nil {
+		s.logger.Error("build webauthn user", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load credentials")
+		return
+	}
 
 	_, err = s.webauthn.FinishLogin(wanUser, *session, r)
 	if err != nil {
@@ -1351,14 +1408,17 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) buildWebAuthnUser(ctx context.Context, user *store.User) *auth.WebAuthnUser {
+func (s *Server) buildWebAuthnUser(ctx context.Context, user *store.User) (*auth.WebAuthnUser, error) {
 	wanUser := &auth.WebAuthnUser{
 		ID:          []byte(user.ID),
 		Name:        user.Email,
 		DisplayName: user.DisplayName,
 	}
 
-	creds, _ := s.store.ListCredentials(ctx, user.ID)
+	creds, err := s.store.ListCredentials(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
 	for _, c := range creds {
 		if c.CredentialType != "webauthn" || len(c.PublicKey) == 0 {
 			continue
@@ -1369,7 +1429,7 @@ func (s *Server) buildWebAuthnUser(ctx context.Context, user *store.User) *auth.
 		}
 	}
 
-	return wanUser
+	return wanUser, nil
 }
 
 // User management handlers
