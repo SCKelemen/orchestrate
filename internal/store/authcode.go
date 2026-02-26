@@ -62,8 +62,18 @@ func (s *Store) GetAuthCode(ctx context.Context, code string) (*AuthCode, error)
 
 // ConsumeAuthCode marks an auth code as consumed (one-time use).
 func (s *Store) ConsumeAuthCode(ctx context.Context, code string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE auth_codes SET consumed = 1 WHERE code = ?`, code,
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE auth_codes SET consumed = 1 WHERE code = ? AND consumed = 0`, code,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("auth code not found or already consumed")
+	}
+	return nil
 }

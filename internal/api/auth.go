@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"net/url"
@@ -140,8 +141,12 @@ func (s *Server) handleBearerTokenExchange(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Validate the bearer token against the bearer provider
-	fakeReq, _ := http.NewRequest("GET", "/", nil)
+	// Validate the bearer token against the bearer provider.
+	fakeReq, err := http.NewRequest("GET", "/", nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	fakeReq.Header.Set("Authorization", "Bearer "+req.Token)
 
 	// Authenticate through configured providers.
@@ -608,7 +613,7 @@ button{padding:10px 24px;cursor:pointer}</style></head>
 <label>Display Name<input type="text" name="display_name"></label>
 <button type="submit" name="action" value="approve">Approve</button>
 <button type="submit" name="action" value="deny">Deny</button>
-</form></body></html>`, userCode)
+</form></body></html>`, html.EscapeString(userCode))
 }
 
 // handleDeviceVerifySubmit processes the device code verification form.
@@ -626,6 +631,14 @@ func (s *Server) handleDeviceVerifySubmit(w http.ResponseWriter, r *http.Request
 
 	if userCode == "" {
 		writeError(w, http.StatusBadRequest, "user_code is required")
+		return
+	}
+	if action != "approve" && action != "deny" {
+		writeError(w, http.StatusBadRequest, "action must be approve or deny")
+		return
+	}
+	if action == "approve" && email == "" {
+		writeError(w, http.StatusBadRequest, "email is required")
 		return
 	}
 
@@ -772,8 +785,13 @@ button{padding:10px 24px;cursor:pointer}</style></head>
 <label>Display Name<input type="text" name="display_name"></label>
 <button type="submit">Login</button>
 </form></body></html>`,
-		q.Get("response_type"), q.Get("client_id"), q.Get("redirect_uri"),
-		q.Get("code_challenge"), q.Get("code_challenge_method"), q.Get("state"), q.Get("scope"))
+		html.EscapeString(q.Get("response_type")),
+		html.EscapeString(q.Get("client_id")),
+		html.EscapeString(q.Get("redirect_uri")),
+		html.EscapeString(q.Get("code_challenge")),
+		html.EscapeString(q.Get("code_challenge_method")),
+		html.EscapeString(q.Get("state")),
+		html.EscapeString(q.Get("scope")))
 }
 
 // handleAuthorizeSubmit processes the login form and redirects with an auth code.
@@ -811,6 +829,10 @@ func (s *Server) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if codeChallengeMethod != "S256" {
 		writeError(w, http.StatusBadRequest, "only S256 code_challenge_method is supported")
+		return
+	}
+	if codeChallenge == "" {
+		writeError(w, http.StatusBadRequest, "code_challenge is required")
 		return
 	}
 
@@ -929,7 +951,10 @@ func (s *Server) handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, req
 	}
 
 	// Consume the code
-	s.store.ConsumeAuthCode(ctx, req.Code)
+	if err := s.store.ConsumeAuthCode(ctx, req.Code); err != nil {
+		writeError(w, http.StatusBadRequest, "authorization code already used")
+		return
+	}
 
 	// Look up user
 	user, err := s.store.GetUser(ctx, ac.UserID)
