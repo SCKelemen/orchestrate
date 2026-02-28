@@ -57,11 +57,17 @@ func (sc *Scheduler) Run(ctx context.Context) error {
 	ticker := time.NewTicker(sc.pollInterval)
 	defer ticker.Stop()
 
+	// Clean expired sessions every 10 minutes.
+	cleanTicker := time.NewTicker(10 * time.Minute)
+	defer cleanTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			sc.logger.Info("scheduler stopping")
 			return ctx.Err()
+		case <-cleanTicker.C:
+			sc.cleanExpiredSessions(ctx)
 		case <-ticker.C:
 			sc.checkSchedules(ctx)
 			sc.poll(ctx)
@@ -95,6 +101,17 @@ func (sc *Scheduler) poll(ctx context.Context) {
 			sc.logger.Error("task execution failed", "task", task.ID, "error", err)
 		}
 	}()
+}
+
+func (sc *Scheduler) cleanExpiredSessions(ctx context.Context) {
+	n, err := sc.store.CleanExpiredSessions(ctx)
+	if err != nil {
+		sc.logger.Error("clean expired sessions", "error", err)
+		return
+	}
+	if n > 0 {
+		sc.logger.Info("cleaned expired sessions", "count", n)
+	}
 }
 
 // checkSchedules finds due schedules and creates tasks from them.

@@ -50,8 +50,17 @@ func credentialsPath() string {
 }
 
 // LoadCredentials reads credentials from disk.
+// Warns to stderr if the file permissions are too open.
 func LoadCredentials() (*Credentials, error) {
-	data, err := os.ReadFile(credentialsPath())
+	path := credentialsPath()
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		fmt.Fprintf(os.Stderr, "WARNING: credentials file %s has permissions %04o; should be 0600\n", path, perm)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

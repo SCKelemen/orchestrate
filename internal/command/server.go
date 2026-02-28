@@ -103,7 +103,27 @@ func newServerCmd() *clix.Command {
 			}
 		}()
 
-		srv := api.NewServer(s, mw, signer, logger)
+		// Configure WebAuthn if ORCHESTRATE_WEBAUTHN_RPID is set.
+		var serverOpts []api.ServerOption
+		if rpID := os.Getenv("ORCHESTRATE_WEBAUTHN_RPID"); rpID != "" {
+			rpName := os.Getenv("ORCHESTRATE_WEBAUTHN_RPNAME")
+			if rpName == "" {
+				rpName = "Orchestrate"
+			}
+			rpOrigins := strings.Split(os.Getenv("ORCHESTRATE_WEBAUTHN_ORIGINS"), ",")
+			wp, err := auth.NewWebAuthnProvider(auth.WebAuthnConfig{
+				RPDisplayName: rpName,
+				RPID:          rpID,
+				RPOrigins:     rpOrigins,
+			})
+			if err != nil {
+				return fmt.Errorf("webauthn: %w", err)
+			}
+			serverOpts = append(serverOpts, api.WithWebAuthn(wp))
+			logger.Info("webauthn enabled", "rpid", rpID)
+		}
+
+		srv := api.NewServer(s, mw, signer, logger, serverOpts...)
 
 		tokenPreview := token
 		if len(tokenPreview) > 8 {
