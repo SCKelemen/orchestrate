@@ -21,6 +21,7 @@ type Server struct {
 	allowInsecureAuth bool
 	allowAnyImage     bool
 	allowedImages     map[string]struct{}
+	logsDir           string
 	webauthn          *auth.WebAuthnProvider
 	webauthnSessions  *auth.WebAuthnSessionStore
 	mux               *http.ServeMux
@@ -58,6 +59,13 @@ func WithImagePolicy(allowed []string, allowAny bool) ServerOption {
 			}
 			s.allowedImages[image] = struct{}{}
 		}
+	}
+}
+
+// WithLogsDir sets the trusted root directory for run log files.
+func WithLogsDir(dir string) ServerOption {
+	return func(s *Server) {
+		s.logsDir = dir
 	}
 }
 
@@ -150,6 +158,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	}
 	s.mux.ServeHTTP(w, r)
+}
+
+func parseFormWithBodyLimit(w http.ResponseWriter, r *http.Request) error {
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	}
+	return r.ParseForm()
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

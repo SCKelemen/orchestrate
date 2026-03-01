@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/SCKelemen/orchestrate/internal/auth"
 	"github.com/SCKelemen/orchestrate/internal/store"
@@ -126,7 +128,14 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(run.LogPath)
+	logPath, err := s.resolveRunLogPath(run)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "log file not found")
+		return
+	}
+
+	// #nosec G703 -- logPath is constrained by resolveRunLogPath (run-id filename and optional logs root).
+	f, err := os.Open(logPath)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "log file not found")
 		return
@@ -153,7 +162,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			break
 		}
-		line := scanner.Text()
+		line := sanitizeSSEData(scanner.Text())
 		n, _ := fmt.Fprintf(w, "data: %s\n\n", line)
 		streamed += int64(n)
 		flusher.Flush()
@@ -168,4 +177,43 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "event: done\ndata: end of log\n\n")
 		flusher.Flush()
 	}
+}
+
+func (s *Server) resolveRunLogPath(run *store.Run) (string, error) {
+	raw := strings.TrimSpace(run.LogPath)
+	if raw == "" {
+		return "", fmt.Errorf("empty log path")
+	}
+
+	cleaned := filepath.Clean(raw)
+	if filepath.Base(cleaned) != run.ID+".log" {
+		return "", fmt.Errorf("unexpected log file name")
+	}
+
+	if strings.TrimSpace(s.logsDir) == "" {
+		return cleaned, nil
+	}
+
+	root, err := filepath.Abs(s.logsDir)
+	if err != nil {
+		return "", err
+	}
+	candidate, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("log path outside allowed root")
+	}
+	return candidate, nil
+}
+
+func sanitizeSSEData(line string) string {
+	line = strings.ReplaceAll(line, "\r", "")
+	line = strings.ReplaceAll(line, "\n", "")
+	return line
 }

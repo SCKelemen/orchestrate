@@ -547,7 +547,7 @@ func TestStreamLogs(t *testing.T) {
 
 	// Create a temp log file
 	logDir := t.TempDir()
-	logFile := filepath.Join(logDir, "run.log")
+	logFile := filepath.Join(logDir, "r1.log")
 	os.WriteFile(logFile, []byte("line1\nline2\nline3\n"), 0o644)
 
 	st.CreateTask(ctx, "t1", store.CreateTaskParams{Prompt: "p", RepoURL: "r"})
@@ -586,6 +586,57 @@ func TestStreamLogsNoLogFile(t *testing.T) {
 		TaskID:     "t1",
 		AgentIndex: 0,
 		Branch:     "b0",
+	})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodGet, "/v1/tasks/t1/runs/r1/:logs", nil))
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestStreamLogsRejectsUnexpectedLogFilename(t *testing.T) {
+	t.Parallel()
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+
+	logDir := t.TempDir()
+	logFile := filepath.Join(logDir, "not-run-id.log")
+	_ = os.WriteFile(logFile, []byte("line1\n"), 0o644)
+
+	st.CreateTask(ctx, "t1", store.CreateTaskParams{Prompt: "p", RepoURL: "r"})
+	st.CreateRun(ctx, "r1", store.CreateRunParams{
+		TaskID:     "t1",
+		AgentIndex: 0,
+		Branch:     "b0",
+		LogPath:    logFile,
+	})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodGet, "/v1/tasks/t1/runs/r1/:logs", nil))
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestStreamLogsRejectsPathOutsideConfiguredRoot(t *testing.T) {
+	t.Parallel()
+
+	allowedDir := t.TempDir()
+	srv, st := newTestServerWithOptions(t, WithLogsDir(allowedDir))
+	ctx := context.Background()
+
+	outsideLog := filepath.Join(t.TempDir(), "r1.log")
+	_ = os.WriteFile(outsideLog, []byte("line1\n"), 0o644)
+
+	st.CreateTask(ctx, "t1", store.CreateTaskParams{Prompt: "p", RepoURL: "r"})
+	st.CreateRun(ctx, "r1", store.CreateRunParams{
+		TaskID:     "t1",
+		AgentIndex: 0,
+		Branch:     "b0",
+		LogPath:    outsideLog,
 	})
 
 	rr := httptest.NewRecorder()

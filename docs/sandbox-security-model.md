@@ -180,6 +180,7 @@ Borrow:
 
 - Manifest persistence on tasks/schedules (`manifest` JSON)
 - Filesystem path scoping via sparse-checkout (repo subpath visibility)
+- Filesystem write-scope enforcement via post-run changed-file policy checks
 - Network policy modes in manifests (`default`, `none`, `allowlist`)
 - Allowlist admission checks for required endpoints (repo host, configured API base URLs)
 

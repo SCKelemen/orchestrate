@@ -139,6 +139,7 @@ func newServerCmd() *clix.Command {
 			strings.EqualFold(os.Getenv("ORCHESTRATE_ENABLE_EMAIL_AUTH"), "true")
 		serverOpts = append(serverOpts, api.WithInsecureEmailAuth(enableInsecureAuth))
 		serverOpts = append(serverOpts, api.WithImagePolicy(allowedImages, allowAnyImage))
+		serverOpts = append(serverOpts, api.WithLogsDir(filepath.Join(dir, "logs")))
 		if enableInsecureAuth {
 			logger.Warn("insecure email-based auth flows are enabled")
 		}

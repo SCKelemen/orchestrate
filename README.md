@@ -201,7 +201,9 @@ The Docker sandbox is hardened by default:
 - Enforces image allowlist at API submit time and sandbox runtime
 - Supports explicit network isolation mode (`ORCHESTRATE_SANDBOX_NETWORK=none`)
 - Supports manifest-based sparse repo visibility (`manifest.sandbox.filesystem`)
+- Enforces manifest filesystem write scope against changed files after each run
 - Supports manifest network policies (`default`, `none`, `allowlist`)
+- Restricts run log streaming to validated run log paths
 
 Additional auth/security controls:
 

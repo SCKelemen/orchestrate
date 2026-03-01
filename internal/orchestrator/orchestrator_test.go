@@ -17,6 +17,7 @@ import (
 type testSandbox struct {
 	createCount int
 	lastCreate  sandbox.CreateOpts
+	execFn      func(ctx context.Context, ws *sandbox.Workspace, cmd []string) (*sandbox.ExecResult, error)
 }
 
 func (s *testSandbox) Create(ctx context.Context, opts sandbox.CreateOpts) (*sandbox.Workspace, error) {
@@ -30,6 +31,9 @@ func (s *testSandbox) Create(ctx context.Context, opts sandbox.CreateOpts) (*san
 }
 
 func (s *testSandbox) Exec(ctx context.Context, ws *sandbox.Workspace, cmd []string) (*sandbox.ExecResult, error) {
+	if s.execFn != nil {
+		return s.execFn(ctx, ws, cmd)
+	}
 	return &sandbox.ExecResult{}, nil
 }
 
@@ -228,6 +232,142 @@ func TestExecuteAgentAppliesManifestSandboxPolicy(t *testing.T) {
 	}
 	if len(sb.lastCreate.VisibleRepoPaths) != 1 || sb.lastCreate.VisibleRepoPaths[0] != "src" {
 		t.Fatalf("visible paths=%v want=[src]", sb.lastCreate.VisibleRepoPaths)
+	}
+}
+
+func TestExecuteAgentRejectsWritesOutsideManifest(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	task, err := s.CreateTask(ctx, "t-manifest-write-violation", store.CreateTaskParams{
+		OwnerUserID: "u1",
+		Agent:       "claude",
+		Prompt:      "do work",
+		RepoURL:     "https://example.com/repo.git",
+		Strategy:    store.StrategyImplement,
+		AgentCount:  1,
+		Image:       "orchestrate-agent:latest",
+		Manifest:    `{"sandbox":{"filesystem":[{"path":"src","access":["read"]}]}}`,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	sb := &testSandbox{
+		execFn: func(ctx context.Context, ws *sandbox.Workspace, cmd []string) (*sandbox.ExecResult, error) {
+			switch strings.Join(cmd, " ") {
+			case "git diff --name-only -z":
+				return &sandbox.ExecResult{ExitCode: 0, Stdout: "README.md\x00"}, nil
+			case "git diff --cached --name-only -z", "git ls-files --others --exclude-standard -z":
+				return &sandbox.ExecResult{ExitCode: 0}, nil
+			default:
+				return &sandbox.ExecResult{ExitCode: 0}, nil
+			}
+		},
+	}
+	ag := &testAgent{result: &agent.Result{ExitCode: 0, Output: "ok"}}
+	orch := New(
+		s,
+		sb,
+		map[string]agent.Agent{
+			agent.BackendClaude: ag,
+		},
+		agent.BackendClaude,
+		t.TempDir(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	_, err = orch.executeAgent(ctx, task, AgentPlan{
+		Index:  0,
+		Branch: "feature/test",
+		Prompt: "hello from test",
+	})
+	if err == nil {
+		t.Fatal("expected write policy violation error")
+	}
+	if !strings.Contains(err.Error(), "filesystem policy violation") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	runs, err := s.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs=%d want=1", len(runs))
+	}
+	if runs[0].State != store.RunFailed {
+		t.Fatalf("run state=%s want=%s", runs[0].State, store.RunFailed)
+	}
+	if !strings.Contains(runs[0].Output, "README.md") {
+		t.Fatalf("run output=%q want unauthorized path", runs[0].Output)
+	}
+}
+
+func TestExecuteAgentAllowsWritesInsideManifest(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	task, err := s.CreateTask(ctx, "t-manifest-write-allowed", store.CreateTaskParams{
+		OwnerUserID: "u1",
+		Agent:       "claude",
+		Prompt:      "do work",
+		RepoURL:     "https://example.com/repo.git",
+		Strategy:    store.StrategyImplement,
+		AgentCount:  1,
+		Image:       "orchestrate-agent:latest",
+		Manifest:    `{"sandbox":{"filesystem":[{"path":"src","access":["write"]}]}}`,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	sb := &testSandbox{
+		execFn: func(ctx context.Context, ws *sandbox.Workspace, cmd []string) (*sandbox.ExecResult, error) {
+			switch strings.Join(cmd, " ") {
+			case "git diff --name-only -z":
+				return &sandbox.ExecResult{ExitCode: 0, Stdout: "src/main.go\x00"}, nil
+			case "git diff --cached --name-only -z", "git ls-files --others --exclude-standard -z":
+				return &sandbox.ExecResult{ExitCode: 0}, nil
+			default:
+				return &sandbox.ExecResult{ExitCode: 0}, nil
+			}
+		},
+	}
+	ag := &testAgent{result: &agent.Result{ExitCode: 0, Output: "ok"}}
+	orch := New(
+		s,
+		sb,
+		map[string]agent.Agent{
+			agent.BackendClaude: ag,
+		},
+		agent.BackendClaude,
+		t.TempDir(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	_, err = orch.executeAgent(ctx, task, AgentPlan{
+		Index:  0,
+		Branch: "feature/test",
+		Prompt: "hello from test",
+	})
+	if err != nil {
+		t.Fatalf("execute agent: %v", err)
+	}
+
+	runs, err := s.ListRuns(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs=%d want=1", len(runs))
+	}
+	if runs[0].State != store.RunSucceeded {
+		t.Fatalf("run state=%s want=%s", runs[0].State, store.RunSucceeded)
 	}
 }
 

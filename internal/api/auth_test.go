@@ -20,6 +20,10 @@ import (
 )
 
 func newTestServer(t *testing.T) (*Server, *store.Store) {
+	return newTestServerWithOptions(t)
+}
+
+func newTestServerWithOptions(t *testing.T, opts ...ServerOption) (*Server, *store.Store) {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "api.db")
@@ -32,7 +36,8 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	signer := auth.NewSigner([]byte("test-secret"), "orchestrate-test")
 	mw := auth.NewMiddleware(auth.NewBearerProvider("test-token"))
-	srv := NewServer(st, mw, signer, logger, WithInsecureEmailAuth(true))
+	srvOpts := append([]ServerOption{WithInsecureEmailAuth(true)}, opts...)
+	srv := NewServer(st, mw, signer, logger, srvOpts...)
 	return srv, st
 }
 

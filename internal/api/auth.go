@@ -640,7 +640,7 @@ func (s *Server) handleDeviceVerifySubmit(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := r.ParseForm(); err != nil {
+	if err := parseFormWithBodyLimit(w, r); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid form data")
 		return
 	}
@@ -841,7 +841,7 @@ func (s *Server) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseForm(); err != nil {
+	if err := parseFormWithBodyLimit(w, r); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid form data")
 		return
 	}

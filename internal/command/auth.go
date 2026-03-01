@@ -346,7 +346,10 @@ func loginWithBrowser(ctx *clix.Context, cc *ClientConfig) error {
 		fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Login successful!</h2><p>You can close this tab.</p><script>window.close()</script></body></html>`)
 	})
 
-	server := &http.Server{Handler: mux}
+	server := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	go server.Serve(listener)
 	defer server.Shutdown(context.Background())
 

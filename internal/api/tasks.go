@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -93,22 +94,12 @@ func authorizeTaskAccess(w http.ResponseWriter, id *auth.Identity, t *store.Task
 
 // newID generates a time-sortable random ID (simplified ULID-style).
 func newID() string {
-	// 6 bytes timestamp (ms) + 10 bytes random = 32 hex chars
-	ts := time.Now().UnixMilli()
+	// 8 bytes timestamp (ms) + 8 bytes random = 32 hex chars.
 	b := make([]byte, 16)
-	b[0] = byte(ts >> 40)
-	b[1] = byte(ts >> 32)
-	b[2] = byte(ts >> 24)
-	b[3] = byte(ts >> 16)
-	b[4] = byte(ts >> 8)
-	b[5] = byte(ts)
-	if _, err := rand.Read(b[6:]); err != nil {
+	binary.BigEndian.PutUint64(b[:8], uint64(time.Now().UnixMilli()))
+	if _, err := rand.Read(b[8:]); err != nil {
 		// Fall back to timestamp-derived bytes if CSPRNG is unavailable.
-		ns := time.Now().UnixNano()
-		for i := 6; i < len(b); i++ {
-			shift := uint((i - 6) * 8)
-			b[i] = byte(ns >> shift)
-		}
+		binary.BigEndian.PutUint64(b[8:], uint64(time.Now().UnixNano()))
 	}
 	return hex.EncodeToString(b)
 }

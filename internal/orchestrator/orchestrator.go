@@ -3,11 +3,14 @@ package orchestrator
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -161,7 +164,7 @@ func (o *Orchestrator) executeAgentsSequential(ctx context.Context, task *store.
 			continue
 		}
 
-		result, err := o.runPlanInWorkspace(ctx, plan, runID, logPath, ws, ag)
+		result, err := o.runPlanInWorkspace(ctx, task, plan, runID, logPath, ws, ag)
 		if err != nil {
 			results[i] = AgentResult{Index: plan.Index, RunID: runID, ExitCode: 1, Output: err.Error()}
 			continue
@@ -198,7 +201,7 @@ func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan 
 	}
 	defer o.sandbox.Destroy(ctx, ws)
 
-	return o.runPlanInWorkspace(ctx, plan, runID, logPath, ws, ag)
+	return o.runPlanInWorkspace(ctx, task, plan, runID, logPath, ws, ag)
 }
 
 func (o *Orchestrator) createRunRecord(ctx context.Context, task *store.Task, plan AgentPlan) (string, string, error) {
@@ -235,7 +238,7 @@ func (o *Orchestrator) resolveTaskAgent(task *store.Task) (string, agent.Agent, 
 	return backend, ag, nil
 }
 
-func (o *Orchestrator) runPlanInWorkspace(ctx context.Context, plan AgentPlan, runID, logPath string, ws *sandbox.Workspace, ag agent.Agent) (*AgentResult, error) {
+func (o *Orchestrator) runPlanInWorkspace(ctx context.Context, task *store.Task, plan AgentPlan, runID, logPath string, ws *sandbox.Workspace, ag agent.Agent) (*AgentResult, error) {
 	o.store.UpdateRunState(ctx, runID, store.RunRunning, nil, "")
 
 	result, err := ag.Run(ctx, ws, plan.Prompt, agent.RunOpts{
@@ -245,6 +248,14 @@ func (o *Orchestrator) runPlanInWorkspace(ctx context.Context, plan AgentPlan, r
 	if err != nil {
 		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
 		return nil, fmt.Errorf("agent run: %w", err)
+	}
+	if err := o.enforceManifestWritePolicy(ctx, ws, task); err != nil {
+		exitCode := result.ExitCode
+		if exitCode == 0 {
+			exitCode = 1
+		}
+		o.store.UpdateRunState(ctx, runID, store.RunFailed, &exitCode, err.Error())
+		return nil, err
 	}
 
 	state := store.RunSucceeded
@@ -298,6 +309,183 @@ func (o *Orchestrator) sandboxCreateOpts(task *store.Task, branch, backend strin
 	return opts, nil
 }
 
+type manifestWritePolicy struct {
+	enforced bool
+	allowAll bool
+	paths    []string
+}
+
+func (p manifestWritePolicy) allows(changedPath string) bool {
+	if !p.enforced || p.allowAll {
+		return true
+	}
+	for _, allowed := range p.paths {
+		if changedPath == allowed || strings.HasPrefix(changedPath, allowed+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func writePolicyFromManifest(raw string) (manifestWritePolicy, error) {
+	manifest, err := store.ParsePermissionManifest(raw)
+	if err != nil {
+		return manifestWritePolicy{}, err
+	}
+
+	if len(manifest.Sandbox.Filesystem) == 0 {
+		return manifestWritePolicy{}, nil
+	}
+
+	allow := map[string]struct{}{}
+	for _, fs := range manifest.Sandbox.Filesystem {
+		p, err := normalizePolicyPath(fs.Path)
+		if err != nil {
+			return manifestWritePolicy{}, err
+		}
+		if !filesystemAccessAllowsWrite(fs.Access) {
+			continue
+		}
+		if p == "." {
+			return manifestWritePolicy{
+				enforced: true,
+				allowAll: true,
+			}, nil
+		}
+		allow[p] = struct{}{}
+	}
+
+	paths := make([]string, 0, len(allow))
+	for p := range allow {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	return manifestWritePolicy{
+		enforced: true,
+		paths:    paths,
+	}, nil
+}
+
+func normalizePolicyPath(raw string) (string, error) {
+	p := strings.TrimSpace(raw)
+	if p == "" {
+		return "", fmt.Errorf("manifest filesystem.path is required")
+	}
+	p = strings.ReplaceAll(p, "\\", "/")
+	if strings.HasPrefix(p, "/") {
+		return "", fmt.Errorf("manifest filesystem.path must be relative: %s", raw)
+	}
+	clean := path.Clean(p)
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("manifest filesystem.path cannot escape repo root: %s", raw)
+	}
+	if clean == ".git" || strings.HasPrefix(clean, ".git/") {
+		return "", fmt.Errorf("manifest filesystem.path cannot target .git: %s", raw)
+	}
+	return clean, nil
+}
+
+func filesystemAccessAllowsWrite(access []string) bool {
+	if len(access) == 0 {
+		return true
+	}
+	for _, a := range access {
+		if strings.EqualFold(strings.TrimSpace(a), "write") {
+			return true
+		}
+	}
+	return false
+}
+
+func (o *Orchestrator) enforceManifestWritePolicy(ctx context.Context, ws *sandbox.Workspace, task *store.Task) error {
+	policy, err := writePolicyFromManifest(task.Manifest)
+	if err != nil {
+		return fmt.Errorf("invalid task manifest: %w", err)
+	}
+	if !policy.enforced {
+		return nil
+	}
+
+	changedPaths, err := o.changedRepoPaths(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("filesystem policy check failed: %w", err)
+	}
+	if len(changedPaths) == 0 {
+		return nil
+	}
+
+	violations := make([]string, 0, len(changedPaths))
+	for _, p := range changedPaths {
+		if !policy.allows(p) {
+			violations = append(violations, p)
+		}
+	}
+	if len(violations) == 0 {
+		return nil
+	}
+	return fmt.Errorf("filesystem policy violation: unauthorized writes to %s", strings.Join(violations, ", "))
+}
+
+func (o *Orchestrator) changedRepoPaths(ctx context.Context, ws *sandbox.Workspace) ([]string, error) {
+	cmds := []struct {
+		args []string
+		name string
+	}{
+		{args: []string{"git", "diff", "--name-only", "-z"}, name: "git diff"},
+		{args: []string{"git", "diff", "--cached", "--name-only", "-z"}, name: "git diff --cached"},
+		{args: []string{"git", "ls-files", "--others", "--exclude-standard", "-z"}, name: "git ls-files"},
+	}
+
+	seen := map[string]struct{}{}
+	changed := make([]string, 0)
+	for _, cmd := range cmds {
+		res, err := o.sandbox.Exec(ctx, ws, cmd.args)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", cmd.name, err)
+		}
+		if res.ExitCode != 0 {
+			msg := strings.TrimSpace(res.Stderr)
+			if msg == "" {
+				msg = strings.TrimSpace(res.Stdout)
+			}
+			if msg == "" {
+				msg = "unknown error"
+			}
+			return nil, fmt.Errorf("%s exited %d: %s", cmd.name, res.ExitCode, msg)
+		}
+
+		for _, raw := range strings.Split(res.Stdout, "\x00") {
+			p := normalizeChangedPath(raw)
+			if p == "" {
+				continue
+			}
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			changed = append(changed, p)
+		}
+	}
+	sort.Strings(changed)
+	return changed, nil
+}
+
+func normalizeChangedPath(raw string) string {
+	p := strings.TrimSpace(raw)
+	if p == "" {
+		return ""
+	}
+	p = strings.ReplaceAll(p, "\\", "/")
+	p = strings.TrimPrefix(p, "./")
+	p = strings.TrimPrefix(p, "/")
+	p = path.Clean(p)
+	if p == "." || p == ".." || strings.HasPrefix(p, "../") {
+		return ""
+	}
+	return p
+}
+
 func (o *Orchestrator) recordPlanFailure(ctx context.Context, task *store.Task, plan AgentPlan, msg string) AgentResult {
 	runID, _, err := o.createRunRecord(ctx, task, plan)
 	if err != nil {
@@ -346,21 +534,11 @@ func copyEnvIfSet(dst map[string]string, key string) {
 }
 
 func newID() string {
-	ts := time.Now().UnixMilli()
 	b := make([]byte, 16)
-	b[0] = byte(ts >> 40)
-	b[1] = byte(ts >> 32)
-	b[2] = byte(ts >> 24)
-	b[3] = byte(ts >> 16)
-	b[4] = byte(ts >> 8)
-	b[5] = byte(ts)
-	if _, err := rand.Read(b[6:]); err != nil {
+	binary.BigEndian.PutUint64(b[:8], uint64(time.Now().UnixMilli()))
+	if _, err := rand.Read(b[8:]); err != nil {
 		// Fall back to timestamp-derived bytes if CSPRNG is unavailable.
-		ns := time.Now().UnixNano()
-		for i := 6; i < len(b); i++ {
-			shift := uint((i - 6) * 8)
-			b[i] = byte(ns >> shift)
-		}
+		binary.BigEndian.PutUint64(b[8:], uint64(time.Now().UnixNano()))
 	}
 	return hex.EncodeToString(b)
 }
