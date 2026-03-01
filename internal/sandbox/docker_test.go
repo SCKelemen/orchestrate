@@ -441,11 +441,11 @@ func TestCreateGitCheckoutFailsCleansUp(t *testing.T) {
 	t.Parallel()
 
 	fn, calls := fakeExecFn([]execResult{
-		{stdout: "cid5\n"},                 // docker create
-		{},                                 // docker start
-		{},                                 // docker exec git clone
-		{err: errors.New("branch error")},  // docker exec git checkout fails
-		{},                                 // docker rm -f (cleanup)
+		{stdout: "cid5\n"},                // docker create
+		{},                                // docker start
+		{},                                // docker exec git clone
+		{err: errors.New("branch error")}, // docker exec git checkout fails
+		{},                                // docker rm -f (cleanup)
 	})
 	d := &Docker{dataDir: "/tmp/orch", exec: fn, allowAnyImage: true}
 
