@@ -33,10 +33,10 @@ func openStore() (*store.Store, error) {
 func Run(ctx context.Context, args []string) error {
 	app := clix.NewApp("orchestrate")
 	app.Version = version
-	app.Description = "Orchestrate parallel Claude Code agents"
+	app.Description = "Orchestrate parallel LLM coding agents"
 
 	root := clix.NewCommand("orchestrate")
-	root.Short = "Orchestrate parallel Claude Code agents"
+	root.Short = "Orchestrate parallel LLM coding agents"
 	root.Children = []*clix.Command{
 		newServerCmd(),
 		newSubmitCmd(),

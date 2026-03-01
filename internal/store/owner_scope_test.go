@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestOwnerColumnsExistAfterMigration(t *testing.T) {
@@ -20,8 +23,14 @@ func TestOwnerColumnsExistAfterMigration(t *testing.T) {
 	if !columnExists(t, s, "tasks", "owner_user_id") {
 		t.Fatal("tasks.owner_user_id column missing")
 	}
+	if !columnExists(t, s, "tasks", "agent") {
+		t.Fatal("tasks.agent column missing")
+	}
 	if !columnExists(t, s, "schedules", "owner_user_id") {
 		t.Fatal("schedules.owner_user_id column missing")
+	}
+	if !columnExists(t, s, "schedules", "agent") {
+		t.Fatal("schedules.agent column missing")
 	}
 }
 
@@ -60,6 +69,9 @@ func TestTaskOwnerFilter(t *testing.T) {
 	}
 	if tasks[0].OwnerUserID != "u1" {
 		t.Fatalf("owner=%q want=u1", tasks[0].OwnerUserID)
+	}
+	if tasks[0].Agent != "claude" {
+		t.Fatalf("agent=%q want=claude", tasks[0].Agent)
 	}
 }
 
@@ -106,6 +118,9 @@ func TestScheduleOwnerFilter(t *testing.T) {
 	if schedules[0].OwnerUserID != "u1" {
 		t.Fatalf("owner=%q want=u1", schedules[0].OwnerUserID)
 	}
+	if schedules[0].Agent != "claude" {
+		t.Fatalf("agent=%q want=claude", schedules[0].Agent)
+	}
 }
 
 func columnExists(t *testing.T, s *Store, table, column string) bool {
@@ -133,4 +148,79 @@ func columnExists(t *testing.T, s *Store, table, column string) bool {
 		}
 	}
 	return false
+}
+
+func TestMigrationAddsAgentAndOwnerColumnsToLegacySchema(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			prompt TEXT NOT NULL,
+			repo_url TEXT NOT NULL,
+			base_ref TEXT NOT NULL DEFAULT 'main',
+			strategy TEXT NOT NULL DEFAULT 'IMPLEMENT',
+			agent_count INTEGER NOT NULL DEFAULT 1,
+			priority INTEGER NOT NULL DEFAULT 0,
+			state TEXT NOT NULL DEFAULT 'QUEUED',
+			image TEXT NOT NULL DEFAULT 'orchestrate-agent:latest',
+			create_time TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+			start_time TEXT,
+			end_time TEXT
+		);
+		CREATE TABLE schedules (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			schedule_expr TEXT NOT NULL,
+			schedule_type TEXT NOT NULL DEFAULT 'CRON',
+			prompt TEXT NOT NULL,
+			repo_url TEXT NOT NULL,
+			base_ref TEXT NOT NULL DEFAULT 'main',
+			strategy TEXT NOT NULL DEFAULT 'IMPLEMENT',
+			agent_count INTEGER NOT NULL DEFAULT 1,
+			image TEXT NOT NULL DEFAULT 'orchestrate-agent:latest',
+			state TEXT NOT NULL DEFAULT 'ACTIVE',
+			last_run_time TEXT,
+			next_run_time TEXT,
+			run_count INTEGER NOT NULL DEFAULT 0,
+			max_runs INTEGER NOT NULL DEFAULT 0,
+			create_time TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+		);
+		INSERT INTO tasks (id, prompt, repo_url) VALUES ('t-legacy', 'p', 'https://example.com/repo.git');
+		INSERT INTO schedules (id, schedule_expr, prompt, repo_url) VALUES ('s-legacy', '0 * * * *', 'p', 'https://example.com/repo.git');
+	`)
+	if err != nil {
+		t.Fatalf("seed legacy db: %v", err)
+	}
+	_ = db.Close()
+
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer s.Close()
+
+	task, err := s.GetTask(context.Background(), "t-legacy")
+	if err != nil || task == nil {
+		t.Fatalf("get migrated task err=%v task=%v", err, task)
+	}
+	if task.OwnerUserID != "system" || task.Agent != "claude" {
+		t.Fatalf("task defaults owner=%q agent=%q", task.OwnerUserID, task.Agent)
+	}
+
+	sc, err := s.GetSchedule(context.Background(), "s-legacy")
+	if err != nil || sc == nil {
+		t.Fatalf("get migrated schedule err=%v schedule=%v", err, sc)
+	}
+	if sc.OwnerUserID != "system" || sc.Agent != "claude" {
+		t.Fatalf("schedule defaults owner=%q agent=%q", sc.OwnerUserID, sc.Agent)
+	}
 }

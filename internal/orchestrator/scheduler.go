@@ -134,6 +134,7 @@ func (sc *Scheduler) checkSchedules(ctx context.Context) {
 		}
 		_, err := sc.store.CreateTask(ctx, taskID, store.CreateTaskParams{
 			OwnerUserID: sched.OwnerUserID,
+			Agent:       sched.Agent,
 			Title:       title + " (schedule/" + sched.ID + ")",
 			Description: sched.Description,
 			Prompt:      sched.Prompt,

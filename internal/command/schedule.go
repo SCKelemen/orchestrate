@@ -33,6 +33,7 @@ func newScheduleCreateCmd() *clix.Command {
 
 	var (
 		cc           ClientConfig
+		agent        string
 		title        string
 		scheduleExpr string
 		prompt       string
@@ -45,6 +46,11 @@ func newScheduleCreateCmd() *clix.Command {
 	)
 
 	cc.RegisterFlags(cmd)
+	cmd.Flags.StringVar(clix.StringVarOptions{
+		FlagOptions: clix.FlagOptions{Name: "agent", EnvVar: "ORCHESTRATE_AGENT"},
+		Default:     "claude",
+		Value:       &agent,
+	})
 	cmd.Flags.StringVar(clix.StringVarOptions{
 		FlagOptions: clix.FlagOptions{Name: "title"},
 		Value:       &title,
@@ -89,6 +95,7 @@ func newScheduleCreateCmd() *clix.Command {
 
 	cmd.Run = func(ctx *clix.Context) error {
 		body := map[string]any{
+			"agent":        agent,
 			"title":        title,
 			"scheduleExpr": scheduleExpr,
 			"prompt":       prompt,

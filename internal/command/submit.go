@@ -16,6 +16,7 @@ func newSubmitCmd() *clix.Command {
 
 	var (
 		cc         ClientConfig
+		agent      string
 		title      string
 		prompt     string
 		repoURL    string
@@ -27,6 +28,11 @@ func newSubmitCmd() *clix.Command {
 	)
 
 	cc.RegisterFlags(cmd)
+	cmd.Flags.StringVar(clix.StringVarOptions{
+		FlagOptions: clix.FlagOptions{Name: "agent", EnvVar: "ORCHESTRATE_AGENT"},
+		Default:     "claude",
+		Value:       &agent,
+	})
 	cmd.Flags.StringVar(clix.StringVarOptions{
 		FlagOptions: clix.FlagOptions{Name: "title"},
 		Value:       &title,
@@ -67,6 +73,7 @@ func newSubmitCmd() *clix.Command {
 
 	cmd.Run = func(ctx *clix.Context) error {
 		body := map[string]any{
+			"agent":      agent,
 			"title":      title,
 			"prompt":     prompt,
 			"repoUrl":    repoURL,

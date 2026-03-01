@@ -19,6 +19,7 @@ const (
 type Schedule struct {
 	ID           string        `json:"name"`
 	OwnerUserID  string        `json:"ownerUserId"`
+	Agent        string        `json:"agent"`
 	Title        string        `json:"title"`
 	Description  string        `json:"description"`
 	ScheduleExpr string        `json:"scheduleExpr"`
@@ -40,6 +41,7 @@ type Schedule struct {
 // CreateScheduleParams holds parameters for creating a new schedule.
 type CreateScheduleParams struct {
 	OwnerUserID  string
+	Agent        string
 	Title        string
 	Description  string
 	ScheduleExpr string
@@ -59,6 +61,9 @@ func (s *Store) CreateSchedule(ctx context.Context, id string, p CreateScheduleP
 	if p.OwnerUserID == "" {
 		p.OwnerUserID = "system"
 	}
+	if p.Agent == "" {
+		p.Agent = "claude"
+	}
 	if p.BaseRef == "" {
 		p.BaseRef = "main"
 	}
@@ -73,10 +78,10 @@ func (s *Store) CreateSchedule(ctx context.Context, id string, p CreateScheduleP
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO schedules (id, owner_user_id, title, description, schedule_expr, schedule_type,
+		INSERT INTO schedules (id, owner_user_id, agent, title, description, schedule_expr, schedule_type,
 			prompt, repo_url, base_ref, strategy, agent_count, image, next_run_time, max_runs)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, p.OwnerUserID, p.Title, p.Description, p.ScheduleExpr, p.ScheduleType,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, p.OwnerUserID, p.Agent, p.Title, p.Description, p.ScheduleExpr, p.ScheduleType,
 		p.Prompt, p.RepoURL, p.BaseRef, string(p.Strategy), p.AgentCount, p.Image,
 		p.NextRunTime, p.MaxRuns,
 	)
@@ -90,12 +95,12 @@ func (s *Store) CreateSchedule(ctx context.Context, id string, p CreateScheduleP
 func (s *Store) GetSchedule(ctx context.Context, id string) (*Schedule, error) {
 	sc := &Schedule{}
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, owner_user_id, title, description, schedule_expr, schedule_type,
+		SELECT id, owner_user_id, agent, title, description, schedule_expr, schedule_type,
 		       prompt, repo_url, base_ref, strategy, agent_count, image,
 		       state, last_run_time, next_run_time, run_count, max_runs, create_time
 		FROM schedules WHERE id = ?`, id,
 	).Scan(
-		&sc.ID, &sc.OwnerUserID, &sc.Title, &sc.Description, &sc.ScheduleExpr, &sc.ScheduleType,
+		&sc.ID, &sc.OwnerUserID, &sc.Agent, &sc.Title, &sc.Description, &sc.ScheduleExpr, &sc.ScheduleType,
 		&sc.Prompt, &sc.RepoURL, &sc.BaseRef, &sc.Strategy, &sc.AgentCount, &sc.Image,
 		&sc.State, &sc.LastRunTime, &sc.NextRunTime, &sc.RunCount, &sc.MaxRuns, &sc.CreateTime,
 	)
@@ -121,7 +126,7 @@ func (s *Store) ListSchedules(ctx context.Context, p ListSchedulesParams) ([]*Sc
 		p.PageSize = 20
 	}
 
-	query := `SELECT id, owner_user_id, title, description, schedule_expr, schedule_type,
+	query := `SELECT id, owner_user_id, agent, title, description, schedule_expr, schedule_type,
 	                 prompt, repo_url, base_ref, strategy, agent_count, image,
 	                 state, last_run_time, next_run_time, run_count, max_runs, create_time
 	          FROM schedules`
@@ -162,7 +167,7 @@ func (s *Store) ListSchedules(ctx context.Context, p ListSchedulesParams) ([]*Sc
 	for rows.Next() {
 		sc := &Schedule{}
 		if err := rows.Scan(
-			&sc.ID, &sc.OwnerUserID, &sc.Title, &sc.Description, &sc.ScheduleExpr, &sc.ScheduleType,
+			&sc.ID, &sc.OwnerUserID, &sc.Agent, &sc.Title, &sc.Description, &sc.ScheduleExpr, &sc.ScheduleType,
 			&sc.Prompt, &sc.RepoURL, &sc.BaseRef, &sc.Strategy, &sc.AgentCount, &sc.Image,
 			&sc.State, &sc.LastRunTime, &sc.NextRunTime, &sc.RunCount, &sc.MaxRuns, &sc.CreateTime,
 		); err != nil {
@@ -177,7 +182,7 @@ func (s *Store) ListSchedules(ctx context.Context, p ListSchedulesParams) ([]*Sc
 func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]*Schedule, error) {
 	nowStr := now.UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, owner_user_id, title, description, schedule_expr, schedule_type,
+		SELECT id, owner_user_id, agent, title, description, schedule_expr, schedule_type,
 		       prompt, repo_url, base_ref, strategy, agent_count, image,
 		       state, last_run_time, next_run_time, run_count, max_runs, create_time
 		FROM schedules
@@ -193,7 +198,7 @@ func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]*Schedule, e
 	for rows.Next() {
 		sc := &Schedule{}
 		if err := rows.Scan(
-			&sc.ID, &sc.OwnerUserID, &sc.Title, &sc.Description, &sc.ScheduleExpr, &sc.ScheduleType,
+			&sc.ID, &sc.OwnerUserID, &sc.Agent, &sc.Title, &sc.Description, &sc.ScheduleExpr, &sc.ScheduleType,
 			&sc.Prompt, &sc.RepoURL, &sc.BaseRef, &sc.Strategy, &sc.AgentCount, &sc.Image,
 			&sc.State, &sc.LastRunTime, &sc.NextRunTime, &sc.RunCount, &sc.MaxRuns, &sc.CreateTime,
 		); err != nil {

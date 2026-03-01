@@ -12,6 +12,7 @@ import (
 )
 
 type createScheduleRequest struct {
+	Agent        string `json:"agent"`
 	Title        string `json:"title"`
 	Description  string `json:"description"`
 	ScheduleExpr string `json:"scheduleExpr"`
@@ -31,6 +32,7 @@ type updateScheduleRequest struct {
 
 type scheduleResponse struct {
 	Name         string  `json:"name"`
+	Agent        string  `json:"agent"`
 	Title        string  `json:"title"`
 	Description  string  `json:"description"`
 	ScheduleExpr string  `json:"scheduleExpr"`
@@ -52,6 +54,7 @@ type scheduleResponse struct {
 func toScheduleResponse(sc *store.Schedule) scheduleResponse {
 	return scheduleResponse{
 		Name:         "schedules/" + sc.ID,
+		Agent:        sc.Agent,
 		Title:        sc.Title,
 		Description:  sc.Description,
 		ScheduleExpr: sc.ScheduleExpr,
@@ -125,6 +128,11 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	agentBackend, err := normalizeAgentBackend(req.Agent)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Validate and parse schedule expression
 	spec, err := schedule.Parse(req.ScheduleExpr)
@@ -139,6 +147,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 	id := newID()
 	sc, err := s.store.CreateSchedule(r.Context(), id, store.CreateScheduleParams{
 		OwnerUserID:  idn.UserID,
+		Agent:        agentBackend,
 		Title:        req.Title,
 		Description:  req.Description,
 		ScheduleExpr: req.ScheduleExpr,

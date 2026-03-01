@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/SCKelemen/orchestrate/internal/agent"
@@ -17,22 +19,27 @@ import (
 
 // Orchestrator coordinates agent execution for tasks.
 type Orchestrator struct {
-	store      *store.Store
-	sandbox    sandbox.Sandbox
-	agent      agent.Agent
-	strategies map[store.Strategy]Strategy
-	dataDir    string
-	logger     *slog.Logger
+	store        *store.Store
+	sandbox      sandbox.Sandbox
+	agents       map[string]agent.Agent
+	defaultAgent string
+	strategies   map[store.Strategy]Strategy
+	dataDir      string
+	logger       *slog.Logger
 }
 
 // New creates a new Orchestrator.
-func New(s *store.Store, sb sandbox.Sandbox, ag agent.Agent, dataDir string, logger *slog.Logger) *Orchestrator {
+func New(s *store.Store, sb sandbox.Sandbox, agents map[string]agent.Agent, defaultAgent string, dataDir string, logger *slog.Logger) *Orchestrator {
+	if defaultAgent == "" {
+		defaultAgent = agent.BackendClaude
+	}
 	o := &Orchestrator{
-		store:   s,
-		sandbox: sb,
-		agent:   ag,
-		dataDir: dataDir,
-		logger:  logger,
+		store:        s,
+		sandbox:      sb,
+		agents:       agents,
+		defaultAgent: defaultAgent,
+		dataDir:      dataDir,
+		logger:       logger,
 		strategies: map[store.Strategy]Strategy{
 			store.StrategyImplement:   Implement{},
 			store.StrategyInvestigate: Investigate{},
@@ -112,15 +119,29 @@ func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan 
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 
+	// Select backend for this task.
+	backendInput := task.Agent
+	if backendInput == "" {
+		backendInput = o.defaultAgent
+	}
+	backend, err := agent.NormalizeBackend(backendInput)
+	if err != nil {
+		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
+		return nil, err
+	}
+	ag, ok := o.agents[backend]
+	if !ok {
+		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), "unsupported agent backend: "+backend)
+		return nil, fmt.Errorf("unsupported agent backend: %s", backend)
+	}
+
 	// Create sandbox workspace
 	ws, err := o.sandbox.Create(ctx, sandbox.CreateOpts{
 		Image:   task.Image,
 		RepoURL: task.RepoURL,
 		BaseRef: task.BaseRef,
 		Branch:  plan.Branch,
-		EnvVars: map[string]string{
-			"ANTHROPIC_API_KEY": "", // will be set from environment
-		},
+		EnvVars: envVarsForBackend(backend),
 	})
 	if err != nil {
 		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
@@ -132,7 +153,7 @@ func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan 
 	o.store.UpdateRunState(ctx, runID, store.RunRunning, nil, "")
 
 	// Execute agent
-	result, err := o.agent.Run(ctx, ws, plan.Prompt, agent.RunOpts{
+	result, err := ag.Run(ctx, ws, plan.Prompt, agent.RunOpts{
 		OutputFormat: "json",
 		LogPath:      logPath,
 	})
@@ -163,6 +184,27 @@ func (o *Orchestrator) failTask(ctx context.Context, taskID string) {
 }
 
 func intPtr(v int) *int { return &v }
+
+func envVarsForBackend(backend string) map[string]string {
+	env := map[string]string{}
+	switch backend {
+	case agent.BackendClaude:
+		copyEnvIfSet(env, "ANTHROPIC_API_KEY")
+		copyEnvIfSet(env, "ANTHROPIC_BASE_URL")
+	case agent.BackendCodex:
+		copyEnvIfSet(env, "OPENAI_API_KEY")
+		copyEnvIfSet(env, "OPENAI_BASE_URL")
+	}
+	return env
+}
+
+func copyEnvIfSet(dst map[string]string, key string) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return
+	}
+	dst[key] = v
+}
 
 func newID() string {
 	ts := time.Now().UnixMilli()

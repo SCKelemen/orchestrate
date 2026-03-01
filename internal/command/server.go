@@ -91,8 +91,13 @@ func newServerCmd() *clix.Command {
 		mw := auth.NewMiddleware(providers...)
 
 		sb := sandbox.NewDocker(dir)
-		ag := agent.NewClaude(sb)
-		orch := orchestrator.New(s, sb, ag, dir, logger)
+		agentBackend := os.Getenv("ORCHESTRATE_AGENT")
+		defaultAgent, err := agent.NormalizeBackend(agentBackend)
+		if err != nil {
+			return fmt.Errorf("invalid ORCHESTRATE_AGENT: %w", err)
+		}
+		logger.Info("agent backend configured", "defaultAgent", defaultAgent)
+		orch := orchestrator.New(s, sb, agent.NewBackends(sb), defaultAgent, dir, logger)
 		sched := orchestrator.NewScheduler(s, orch, orchestrator.SchedulerOpts{
 			MaxConcurrent: maxConcurrent,
 		}, logger)

@@ -15,6 +15,7 @@ import (
 
 // createTaskRequest is the JSON body for CreateTask.
 type createTaskRequest struct {
+	Agent       string `json:"agent"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Prompt      string `json:"prompt"`
@@ -36,6 +37,7 @@ type updateTaskRequest struct {
 // taskResponse wraps a task for AIP-style JSON output.
 type taskResponse struct {
 	Name        string  `json:"name"`
+	Agent       string  `json:"agent"`
 	Title       string  `json:"title"`
 	Description string  `json:"description"`
 	Prompt      string  `json:"prompt"`
@@ -54,6 +56,7 @@ type taskResponse struct {
 func toTaskResponse(t *store.Task) taskResponse {
 	return taskResponse{
 		Name:        "tasks/" + t.ID,
+		Agent:       t.Agent,
 		Title:       t.Title,
 		Description: t.Description,
 		Prompt:      t.Prompt,
@@ -142,10 +145,16 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	agentBackend, err := normalizeAgentBackend(req.Agent)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	id := newID()
 	task, err := s.store.CreateTask(r.Context(), id, store.CreateTaskParams{
 		OwnerUserID: idn.UserID,
+		Agent:       agentBackend,
 		Title:       req.Title,
 		Description: req.Description,
 		Prompt:      req.Prompt,

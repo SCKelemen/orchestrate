@@ -38,8 +38,14 @@ func (s *Store) migrate() error {
 	if err := s.ensureColumn("tasks", "owner_user_id", "TEXT NOT NULL DEFAULT 'system'"); err != nil {
 		return fmt.Errorf("ensure tasks.owner_user_id: %w", err)
 	}
+	if err := s.ensureColumn("tasks", "agent", "TEXT NOT NULL DEFAULT 'claude'"); err != nil {
+		return fmt.Errorf("ensure tasks.agent: %w", err)
+	}
 	if err := s.ensureColumn("schedules", "owner_user_id", "TEXT NOT NULL DEFAULT 'system'"); err != nil {
 		return fmt.Errorf("ensure schedules.owner_user_id: %w", err)
+	}
+	if err := s.ensureColumn("schedules", "agent", "TEXT NOT NULL DEFAULT 'claude'"); err != nil {
+		return fmt.Errorf("ensure schedules.agent: %w", err)
 	}
 	if _, err := s.db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_tasks_owner_state_priority
@@ -87,6 +93,7 @@ const schema = `
 CREATE TABLE IF NOT EXISTS tasks (
 	id          TEXT PRIMARY KEY,
 	owner_user_id TEXT NOT NULL DEFAULT 'system',
+	agent       TEXT NOT NULL DEFAULT 'claude',
 	title       TEXT NOT NULL DEFAULT '',
 	description TEXT NOT NULL DEFAULT '',
 	prompt      TEXT NOT NULL,
@@ -124,6 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
 CREATE TABLE IF NOT EXISTS schedules (
 	id            TEXT PRIMARY KEY,
 	owner_user_id TEXT NOT NULL DEFAULT 'system',
+	agent         TEXT NOT NULL DEFAULT 'claude',
 	title         TEXT NOT NULL DEFAULT '',
 	description   TEXT NOT NULL DEFAULT '',
 	schedule_expr TEXT NOT NULL,

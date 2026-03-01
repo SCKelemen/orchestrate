@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 
+	"github.com/SCKelemen/orchestrate/internal/agent"
 	"github.com/SCKelemen/orchestrate/internal/store"
 )
 
@@ -41,4 +42,8 @@ func validatePromptSize(prompt string) error {
 		return fmt.Errorf("prompt exceeds %d bytes", maxPromptSize)
 	}
 	return nil
+}
+
+func normalizeAgentBackend(raw string) (string, error) {
+	return agent.NormalizeBackend(raw)
 }
