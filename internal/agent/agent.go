@@ -20,10 +20,10 @@ type Agent interface {
 
 // RunOpts are options for an agent run.
 type RunOpts struct {
-	Model         string
-	MaxTurns      int
-	MaxBudgetUSD  float64
-	AllowedTools  []string
-	OutputFormat  string
-	LogPath       string
+	Model        string
+	MaxTurns     int
+	MaxBudgetUSD float64
+	AllowedTools []string
+	OutputFormat string
+	LogPath      string
 }

@@ -146,7 +146,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024) // 512KB max line
-	const maxBytes = 10 << 20                           // 10MB
+	const maxBytes = 10 << 20                          // 10MB
 	var streamed int64
 
 	for scanner.Scan() {

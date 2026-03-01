@@ -17,9 +17,9 @@ import (
 // https://datatracker.ietf.org/doc/html/rfc7519
 
 var (
-	ErrTokenExpired  = errors.New("token expired")
+	ErrTokenExpired   = errors.New("token expired")
 	ErrTokenMalformed = errors.New("malformed token")
-	ErrTokenInvalid  = errors.New("invalid token signature")
+	ErrTokenInvalid   = errors.New("invalid token signature")
 )
 
 // Claims represents JWT claims.

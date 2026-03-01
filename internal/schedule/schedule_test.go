@@ -36,15 +36,15 @@ func TestParseCronValid(t *testing.T) {
 func TestParseCronInvalid(t *testing.T) {
 	t.Parallel()
 	cases := []string{
-		"0 0 * *",          // 4 fields
-		"0 0 * * * *",      // 6 fields
-		"60 0 * * *",       // minute out of range
-		"0 24 * * *",       // hour out of range
-		"0 0 32 * *",       // day out of range
-		"0 0 * 13 *",       // month out of range
-		"0 0 * * 7",        // dow out of range
-		"*/0 * * * *",      // step 0
-		"abc * * * *",      // non-numeric
+		"0 0 * *",     // 4 fields
+		"0 0 * * * *", // 6 fields
+		"60 0 * * *",  // minute out of range
+		"0 24 * * *",  // hour out of range
+		"0 0 32 * *",  // day out of range
+		"0 0 * 13 *",  // month out of range
+		"0 0 * * 7",   // dow out of range
+		"*/0 * * * *", // step 0
+		"abc * * * *", // non-numeric
 	}
 	for _, expr := range cases {
 		expr := expr
