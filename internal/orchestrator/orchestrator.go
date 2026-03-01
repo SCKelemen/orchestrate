@@ -28,6 +28,10 @@ type Orchestrator struct {
 	logger       *slog.Logger
 }
 
+type sequentialHandoffStrategy interface {
+	SequentialHandoff() bool
+}
+
 // New creates a new Orchestrator.
 func New(s *store.Store, sb sandbox.Sandbox, agents map[string]agent.Agent, defaultAgent string, dataDir string, logger *slog.Logger) *Orchestrator {
 	if defaultAgent == "" {
@@ -68,26 +72,11 @@ func (o *Orchestrator) Execute(ctx context.Context, task *store.Task) error {
 		return fmt.Errorf("plan: %w", err)
 	}
 
-	// Execute agents in parallel
-	results := make([]AgentResult, len(plans))
-	g, gctx := errgroup.WithContext(ctx)
-
-	for i, plan := range plans {
-		g.Go(func() error {
-			result, err := o.executeAgent(gctx, task, plan)
-			if err != nil {
-				o.logger.Error("agent failed", "task", task.ID, "agent", i, "error", err)
-				results[i] = AgentResult{Index: i, ExitCode: 1, Output: err.Error()}
-				return nil // don't fail the group
-			}
-			results[i] = *result
-			return nil
-		})
-	}
-
-	if err := g.Wait(); err != nil {
-		o.failTask(ctx, task.ID)
-		return fmt.Errorf("execute agents: %w", err)
+	var results []AgentResult
+	if usesSequentialHandoff(strategy) {
+		results = o.executeAgentsSequential(ctx, task, plans)
+	} else {
+		results = o.executeAgentsParallel(ctx, task, plans)
 	}
 
 	// Evaluate
@@ -105,36 +94,93 @@ func (o *Orchestrator) Execute(ctx context.Context, task *store.Task) error {
 	return o.store.UpdateTaskState(ctx, task.ID, store.TaskFailed)
 }
 
-func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan AgentPlan) (*AgentResult, error) {
-	runID := newID()
-	logDir := filepath.Join(o.dataDir, "logs")
-	logPath := filepath.Join(logDir, runID+".log")
+func usesSequentialHandoff(strategy Strategy) bool {
+	s, ok := strategy.(sequentialHandoffStrategy)
+	return ok && s.SequentialHandoff()
+}
 
-	// Create run record
-	_, err := o.store.CreateRun(ctx, runID, store.CreateRunParams{
-		TaskID:     task.ID,
-		AgentIndex: plan.Index,
-		Branch:     plan.Branch,
-		LogPath:    logPath,
+func (o *Orchestrator) executeAgentsParallel(ctx context.Context, task *store.Task, plans []AgentPlan) []AgentResult {
+	results := make([]AgentResult, len(plans))
+	g, gctx := errgroup.WithContext(ctx)
+
+	for i, plan := range plans {
+		i := i
+		plan := plan
+		g.Go(func() error {
+			result, err := o.executeAgent(gctx, task, plan)
+			if err != nil {
+				o.logger.Error("agent failed", "task", task.ID, "agent", i, "error", err)
+				results[i] = AgentResult{Index: plan.Index, ExitCode: 1, Output: err.Error()}
+				return nil // don't fail the group
+			}
+			results[i] = *result
+			return nil
+		})
+	}
+
+	_ = g.Wait()
+	return results
+}
+
+func (o *Orchestrator) executeAgentsSequential(ctx context.Context, task *store.Task, plans []AgentPlan) []AgentResult {
+	results := make([]AgentResult, len(plans))
+
+	backend, ag, err := o.resolveTaskAgent(task)
+	if err != nil {
+		for i, plan := range plans {
+			results[i] = o.recordPlanFailure(ctx, task, plan, err.Error())
+		}
+		return results
+	}
+
+	sharedBranch := sharedHandoffBranch(task.ID, plans)
+	ws, err := o.sandbox.Create(ctx, sandbox.CreateOpts{
+		Image:   task.Image,
+		RepoURL: task.RepoURL,
+		BaseRef: task.BaseRef,
+		Branch:  sharedBranch,
+		EnvVars: envVarsForBackend(backend),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create run: %w", err)
+		msg := fmt.Sprintf("create workspace: %v", err)
+		for i, plan := range plans {
+			plan.Branch = sharedBranch
+			results[i] = o.recordPlanFailure(ctx, task, plan, msg)
+		}
+		return results
+	}
+	defer o.sandbox.Destroy(ctx, ws)
+
+	for i, plan := range plans {
+		plan.Branch = sharedBranch
+
+		runID, logPath, err := o.createRunRecord(ctx, task, plan)
+		if err != nil {
+			results[i] = AgentResult{Index: plan.Index, ExitCode: 1, Output: err.Error()}
+			continue
+		}
+
+		result, err := o.runPlanInWorkspace(ctx, plan, runID, logPath, ws, ag)
+		if err != nil {
+			results[i] = AgentResult{Index: plan.Index, RunID: runID, ExitCode: 1, Output: err.Error()}
+			continue
+		}
+		results[i] = *result
 	}
 
-	// Select backend for this task.
-	backendInput := task.Agent
-	if backendInput == "" {
-		backendInput = o.defaultAgent
+	return results
+}
+
+func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan AgentPlan) (*AgentResult, error) {
+	runID, logPath, err := o.createRunRecord(ctx, task, plan)
+	if err != nil {
+		return nil, err
 	}
-	backend, err := agent.NormalizeBackend(backendInput)
+
+	backend, ag, err := o.resolveTaskAgent(task)
 	if err != nil {
 		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
 		return nil, err
-	}
-	ag, ok := o.agents[backend]
-	if !ok {
-		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), "unsupported agent backend: "+backend)
-		return nil, fmt.Errorf("unsupported agent backend: %s", backend)
 	}
 
 	// Create sandbox workspace
@@ -151,10 +197,46 @@ func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan 
 	}
 	defer o.sandbox.Destroy(ctx, ws)
 
-	// Mark run as running
+	return o.runPlanInWorkspace(ctx, plan, runID, logPath, ws, ag)
+}
+
+func (o *Orchestrator) createRunRecord(ctx context.Context, task *store.Task, plan AgentPlan) (string, string, error) {
+	runID := newID()
+	logDir := filepath.Join(o.dataDir, "logs")
+	logPath := filepath.Join(logDir, runID+".log")
+
+	_, err := o.store.CreateRun(ctx, runID, store.CreateRunParams{
+		TaskID:     task.ID,
+		AgentIndex: plan.Index,
+		Branch:     plan.Branch,
+		LogPath:    logPath,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("create run: %w", err)
+	}
+
+	return runID, logPath, nil
+}
+
+func (o *Orchestrator) resolveTaskAgent(task *store.Task) (string, agent.Agent, error) {
+	backendInput := task.Agent
+	if backendInput == "" {
+		backendInput = o.defaultAgent
+	}
+	backend, err := agent.NormalizeBackend(backendInput)
+	if err != nil {
+		return "", nil, err
+	}
+	ag, ok := o.agents[backend]
+	if !ok {
+		return "", nil, fmt.Errorf("unsupported agent backend: %s", backend)
+	}
+	return backend, ag, nil
+}
+
+func (o *Orchestrator) runPlanInWorkspace(ctx context.Context, plan AgentPlan, runID, logPath string, ws *sandbox.Workspace, ag agent.Agent) (*AgentResult, error) {
 	o.store.UpdateRunState(ctx, runID, store.RunRunning, nil, "")
 
-	// Execute agent
 	result, err := ag.Run(ctx, ws, plan.Prompt, agent.RunOpts{
 		OutputFormat: "json",
 		LogPath:      logPath,
@@ -164,7 +246,6 @@ func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan 
 		return nil, fmt.Errorf("agent run: %w", err)
 	}
 
-	// Update run state
 	state := store.RunSucceeded
 	if result.ExitCode != 0 {
 		state = store.RunFailed
@@ -177,6 +258,24 @@ func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan 
 		ExitCode: result.ExitCode,
 		Output:   result.Output,
 	}, nil
+}
+
+func (o *Orchestrator) recordPlanFailure(ctx context.Context, task *store.Task, plan AgentPlan, msg string) AgentResult {
+	runID, _, err := o.createRunRecord(ctx, task, plan)
+	if err != nil {
+		return AgentResult{Index: plan.Index, ExitCode: 1, Output: fmt.Sprintf("%s; create run failed: %v", msg, err)}
+	}
+	o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), msg)
+	return AgentResult{Index: plan.Index, RunID: runID, ExitCode: 1, Output: msg}
+}
+
+func sharedHandoffBranch(taskID string, plans []AgentPlan) string {
+	for _, p := range plans {
+		if strings.TrimSpace(p.Branch) != "" {
+			return p.Branch
+		}
+	}
+	return fmt.Sprintf("orchestrate/%s/handoff", taskID)
 }
 
 func (o *Orchestrator) failTask(ctx context.Context, taskID string) {

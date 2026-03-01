@@ -339,6 +339,15 @@ func TestAdversarialName(t *testing.T) {
 	}
 }
 
+func TestAdversarialSequentialHandoff(t *testing.T) {
+	t.Parallel()
+
+	s := Adversarial{}
+	if !s.SequentialHandoff() {
+		t.Fatal("adversarial should require sequential handoff")
+	}
+}
+
 // --- CodeAndTest ---
 
 func TestCodeAndTestPlan(t *testing.T) {
@@ -394,5 +403,14 @@ func TestCodeAndTestName(t *testing.T) {
 	s := CodeAndTest{}
 	if s.Name() != "CODE_AND_TEST" {
 		t.Fatalf("name = %q", s.Name())
+	}
+}
+
+func TestCodeAndTestSequentialHandoff(t *testing.T) {
+	t.Parallel()
+
+	s := CodeAndTest{}
+	if !s.SequentialHandoff() {
+		t.Fatal("code_and_test should require sequential handoff")
 	}
 }

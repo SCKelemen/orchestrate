@@ -11,6 +11,9 @@ import (
 type CodeAndTest struct{}
 
 func (CodeAndTest) Name() string { return string(store.StrategyCodeAndTest) }
+func (CodeAndTest) SequentialHandoff() bool {
+	return true
+}
 
 func (CodeAndTest) Plan(_ context.Context, task *store.Task) ([]AgentPlan, error) {
 	return []AgentPlan{
@@ -56,6 +59,7 @@ func buildTestWriterPrompt(base string) string {
 	return "ROLE: TEST WRITER\n" +
 		"Goal: Add or improve tests for the requested functionality.\n" +
 		"Requirements:\n" +
+		"- You are running after the code writer in the same workspace/branch; test the current implementation.\n" +
 		"- Focus on behavior, edge cases, and regression protection.\n" +
 		"- Prefer deterministic, fast tests.\n" +
 		"- If critical behavior cannot be tested, clearly report the gap.\n\n" +

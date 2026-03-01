@@ -162,6 +162,8 @@ func TestValidateRedirectURI(t *testing.T) {
 	}{
 		{"http localhost ok", "http://localhost/callback", false},
 		{"http 127.0.0.1 ok", "http://127.0.0.1:8080/cb", false},
+		{"http ::1 ok", "http://[::1]:8080/cb", false},
+		{"http non-loopback ip bad", "http://8.8.8.8/cb", true},
 		{"https remote ok", "https://example.com/cb", false},
 		{"ftp bad scheme", "ftp://example.com/cb", true},
 		{"http remote host bad", "http://example.com/cb", true},

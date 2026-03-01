@@ -1787,8 +1787,14 @@ func validateRedirectURI(raw string) error {
 	if host == "" {
 		return fmt.Errorf("host is required")
 	}
-	if u.Scheme == "http" && host != "localhost" && net.ParseIP(host) == nil {
-		return fmt.Errorf("http redirect_uri must be localhost or IP")
+	if u.Scheme == "http" {
+		if strings.EqualFold(host, "localhost") {
+			return nil
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			return fmt.Errorf("http redirect_uri must be localhost or loopback IP")
+		}
 	}
 	return nil
 }

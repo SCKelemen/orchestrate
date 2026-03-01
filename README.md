@@ -19,8 +19,8 @@ Orchestrate gives you:
 
 - Run one-off coding tasks against a repo + base branch
 - Fan out work across multiple agents in parallel (`COMPETE` / `BATCH`)
-- Run adversarial review mode (`ADVERSARIAL`) with implementer + reviewer roles
-- Split work into code + tests roles (`CODE_AND_TEST`)
+- Run adversarial review mode (`ADVERSARIAL`) with implementer + reviewer roles (sequential shared-workspace handoff)
+- Split work into code + tests roles (`CODE_AND_TEST`) with sequential shared-workspace handoff
 - Run recurring jobs using cron or ISO-8601 intervals
 - Keep per-run execution logs and run state history
 - Authenticate via static bearer token (bootstrap/admin)

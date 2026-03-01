@@ -12,6 +12,9 @@ import (
 type Adversarial struct{}
 
 func (Adversarial) Name() string { return string(store.StrategyAdversarial) }
+func (Adversarial) SequentialHandoff() bool {
+	return true
+}
 
 func (Adversarial) Plan(_ context.Context, task *store.Task) ([]AgentPlan, error) {
 	return []AgentPlan{
@@ -61,6 +64,7 @@ func buildReviewerPrompt(base string) string {
 	return "ROLE: REVIEWER (ADVERSARIAL)\n" +
 		"Goal: Attempt to find correctness, security, and regression issues for the requested change.\n" +
 		"Requirements:\n" +
+		"- You are running after the implementer in the same workspace/branch; inspect the current working tree.\n" +
 		"- Focus on edge cases, failure modes, authz/authn risks, and test gaps.\n" +
 		"- If you find blocking issues, report them clearly and exit non-zero.\n" +
 		"- If no blocking issues are found, exit zero with a concise rationale.\n\n" +
