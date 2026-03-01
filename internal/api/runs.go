@@ -145,12 +145,27 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024) // 512KB max line
+	const maxBytes = 10 << 20                           // 10MB
+	var streamed int64
+
 	for scanner.Scan() {
-		fmt.Fprintf(w, "data: %s\n\n", scanner.Text())
+		if r.Context().Err() != nil {
+			break
+		}
+		line := scanner.Text()
+		n, _ := fmt.Fprintf(w, "data: %s\n\n", line)
+		streamed += int64(n)
 		flusher.Flush()
+		if streamed >= maxBytes {
+			fmt.Fprintf(w, "event: truncated\ndata: log size limit reached\n\n")
+			flusher.Flush()
+			break
+		}
 	}
 
-	// If the run is still going, we could tail. For now, just send what we have.
-	fmt.Fprintf(w, "event: done\ndata: end of log\n\n")
-	flusher.Flush()
+	if streamed < maxBytes && r.Context().Err() == nil {
+		fmt.Fprintf(w, "event: done\ndata: end of log\n\n")
+		flusher.Flush()
+	}
 }

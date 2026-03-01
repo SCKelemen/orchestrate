@@ -341,7 +341,11 @@ func (s *Server) pauseSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to pause schedule")
 		return
 	}
-	sc, _ = s.store.GetSchedule(r.Context(), id)
+	sc, err = s.store.GetSchedule(r.Context(), id)
+	if err != nil || sc == nil {
+		writeError(w, http.StatusInternalServerError, "failed to retrieve updated schedule")
+		return
+	}
 	writeJSON(w, http.StatusOK, toScheduleResponse(sc))
 }
 
@@ -381,6 +385,10 @@ func (s *Server) resumeSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sc, _ = s.store.GetSchedule(r.Context(), id)
+	sc, err = s.store.GetSchedule(r.Context(), id)
+	if err != nil || sc == nil {
+		writeError(w, http.StatusInternalServerError, "failed to retrieve updated schedule")
+		return
+	}
 	writeJSON(w, http.StatusOK, toScheduleResponse(sc))
 }

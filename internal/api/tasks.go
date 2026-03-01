@@ -345,7 +345,11 @@ func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to cancel task")
 		return
 	}
-	task, _ = s.store.GetTask(r.Context(), id)
+	task, err = s.store.GetTask(r.Context(), id)
+	if err != nil || task == nil {
+		writeError(w, http.StatusInternalServerError, "failed to retrieve updated task")
+		return
+	}
 	writeJSON(w, http.StatusOK, toTaskResponse(task))
 }
 
@@ -375,6 +379,10 @@ func (s *Server) retryTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to retry task")
 		return
 	}
-	task, _ = s.store.GetTask(r.Context(), id)
+	task, err = s.store.GetTask(r.Context(), id)
+	if err != nil || task == nil {
+		writeError(w, http.StatusInternalServerError, "failed to retrieve updated task")
+		return
+	}
 	writeJSON(w, http.StatusOK, toTaskResponse(task))
 }
