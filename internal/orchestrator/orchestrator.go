@@ -134,13 +134,14 @@ func (o *Orchestrator) executeAgentsSequential(ctx context.Context, task *store.
 	}
 
 	sharedBranch := sharedHandoffBranch(task.ID, plans)
-	ws, err := o.sandbox.Create(ctx, sandbox.CreateOpts{
-		Image:   task.Image,
-		RepoURL: task.RepoURL,
-		BaseRef: task.BaseRef,
-		Branch:  sharedBranch,
-		EnvVars: envVarsForBackend(backend),
-	})
+	createOpts, err := o.sandboxCreateOpts(task, sharedBranch, backend)
+	if err != nil {
+		for i, plan := range plans {
+			results[i] = o.recordPlanFailure(ctx, task, plan, err.Error())
+		}
+		return results
+	}
+	ws, err := o.sandbox.Create(ctx, createOpts)
 	if err != nil {
 		msg := fmt.Sprintf("create workspace: %v", err)
 		for i, plan := range plans {
@@ -183,14 +184,14 @@ func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan 
 		return nil, err
 	}
 
+	createOpts, err := o.sandboxCreateOpts(task, plan.Branch, backend)
+	if err != nil {
+		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
+		return nil, err
+	}
+
 	// Create sandbox workspace
-	ws, err := o.sandbox.Create(ctx, sandbox.CreateOpts{
-		Image:   task.Image,
-		RepoURL: task.RepoURL,
-		BaseRef: task.BaseRef,
-		Branch:  plan.Branch,
-		EnvVars: envVarsForBackend(backend),
-	})
+	ws, err := o.sandbox.Create(ctx, createOpts)
 	if err != nil {
 		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
 		return nil, fmt.Errorf("create workspace: %w", err)
@@ -258,6 +259,43 @@ func (o *Orchestrator) runPlanInWorkspace(ctx context.Context, plan AgentPlan, r
 		ExitCode: result.ExitCode,
 		Output:   result.Output,
 	}, nil
+}
+
+func (o *Orchestrator) sandboxCreateOpts(task *store.Task, branch, backend string) (sandbox.CreateOpts, error) {
+	opts := sandbox.CreateOpts{
+		Image:   task.Image,
+		RepoURL: task.RepoURL,
+		BaseRef: task.BaseRef,
+		Branch:  branch,
+		EnvVars: envVarsForBackend(backend),
+	}
+
+	manifest, err := store.ParsePermissionManifest(task.Manifest)
+	if err != nil {
+		return sandbox.CreateOpts{}, fmt.Errorf("invalid task manifest: %w", err)
+	}
+	if len(manifest.Sandbox.Filesystem) > 0 {
+		paths := make([]string, 0, len(manifest.Sandbox.Filesystem))
+		for _, fs := range manifest.Sandbox.Filesystem {
+			paths = append(paths, fs.Path)
+		}
+		opts.VisibleRepoPaths = paths
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(manifest.Sandbox.Network.Mode))
+	switch mode {
+	case "", store.ManifestNetworkModeDefault:
+		// Keep sandbox default.
+	case store.ManifestNetworkModeNone:
+		opts.NetworkMode = sandbox.NetworkModeNone
+	case store.ManifestNetworkModeAllowlist:
+		opts.NetworkMode = sandbox.NetworkModeAllowlist
+		opts.AllowedEgressDomains = append([]string(nil), manifest.Sandbox.Network.Allow...)
+	default:
+		return sandbox.CreateOpts{}, fmt.Errorf("invalid task manifest network mode: %s", manifest.Sandbox.Network.Mode)
+	}
+
+	return opts, nil
 }
 
 func (o *Orchestrator) recordPlanFailure(ctx context.Context, task *store.Task, plan AgentPlan, msg string) AgentResult {

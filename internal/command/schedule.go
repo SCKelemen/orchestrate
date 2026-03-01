@@ -43,6 +43,9 @@ func newScheduleCreateCmd() *clix.Command {
 		agentCount   int
 		image        string
 		maxRuns      int
+		fsPaths      string
+		network      string
+		egress       string
 	)
 
 	cc.RegisterFlags(cmd)
@@ -92,6 +95,18 @@ func newScheduleCreateCmd() *clix.Command {
 		Default:     "0",
 		Value:       &maxRuns,
 	})
+	cmd.Flags.StringVar(clix.StringVarOptions{
+		FlagOptions: clix.FlagOptions{Name: "fs-paths"},
+		Value:       &fsPaths,
+	})
+	cmd.Flags.StringVar(clix.StringVarOptions{
+		FlagOptions: clix.FlagOptions{Name: "network-mode"},
+		Value:       &network,
+	})
+	cmd.Flags.StringVar(clix.StringVarOptions{
+		FlagOptions: clix.FlagOptions{Name: "egress-domains"},
+		Value:       &egress,
+	})
 
 	cmd.Run = func(ctx *clix.Context) error {
 		body := map[string]any{
@@ -105,6 +120,9 @@ func newScheduleCreateCmd() *clix.Command {
 			"agentCount":   agentCount,
 			"image":        image,
 			"maxRuns":      maxRuns,
+		}
+		if manifest := buildManifestPayload(fsPaths, network, egress); manifest != nil {
+			body["manifest"] = manifest
 		}
 
 		data, _ := json.Marshal(body)

@@ -170,17 +170,23 @@ Borrow:
 
 ## Rollout Plan
 
-### Phase 0 (completed in this pass)
+### Phase 0 (completed)
 
 - Image allowlist enforcement (API + runtime)
 - Optional network isolation mode (`default` / `none`)
 - CI security scanning with `govulncheck` and `gosec`
 
-### Phase 1
+### Phase 1 (partially completed)
+
+- Manifest persistence on tasks/schedules (`manifest` JSON)
+- Filesystem path scoping via sparse-checkout (repo subpath visibility)
+- Network policy modes in manifests (`default`, `none`, `allowlist`)
+- Allowlist admission checks for required endpoints (repo host, configured API base URLs)
+
+Remaining:
 
 - Add first-class manifest schema to task/schedule APIs.
-- Add path-scoped filesystem permissions.
-- Add domain allowlist egress mode (not just `none`).
+- Add hard egress enforcement for allowlist mode (kernel/network layer, not just admission checks).
 
 ### Phase 2
 

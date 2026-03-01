@@ -25,6 +25,9 @@ func newSubmitCmd() *clix.Command {
 		agentCount int
 		priority   int
 		image      string
+		fsPaths    string
+		network    string
+		egress     string
 	)
 
 	cc.RegisterFlags(cmd)
@@ -70,6 +73,18 @@ func newSubmitCmd() *clix.Command {
 		Default:     "orchestrate-agent:latest",
 		Value:       &image,
 	})
+	cmd.Flags.StringVar(clix.StringVarOptions{
+		FlagOptions: clix.FlagOptions{Name: "fs-paths"},
+		Value:       &fsPaths,
+	})
+	cmd.Flags.StringVar(clix.StringVarOptions{
+		FlagOptions: clix.FlagOptions{Name: "network-mode"},
+		Value:       &network,
+	})
+	cmd.Flags.StringVar(clix.StringVarOptions{
+		FlagOptions: clix.FlagOptions{Name: "egress-domains"},
+		Value:       &egress,
+	})
 
 	cmd.Run = func(ctx *clix.Context) error {
 		body := map[string]any{
@@ -82,6 +97,9 @@ func newSubmitCmd() *clix.Command {
 			"agentCount": agentCount,
 			"priority":   priority,
 			"image":      image,
+		}
+		if manifest := buildManifestPayload(fsPaths, network, egress); manifest != nil {
+			body["manifest"] = manifest
 		}
 
 		data, _ := json.Marshal(body)

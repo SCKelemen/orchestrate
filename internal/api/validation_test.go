@@ -275,6 +275,112 @@ func TestCreateScheduleRejectsDisallowedImage(t *testing.T) {
 	}
 }
 
+func TestCreateTaskAcceptsManifestFilesystemScope(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _, adminToken := newSecuredTestServer(t)
+	body := `{
+		"prompt":"do work",
+		"repoUrl":"https://example.com/repo.git",
+		"manifest":{
+			"sandbox":{
+				"filesystem":[{"path":"src","access":["read","write"]}]
+			}
+		}
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestCreateTaskRejectsManifestFilesystemTraversal(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _, adminToken := newSecuredTestServer(t)
+	body := `{
+		"prompt":"do work",
+		"repoUrl":"https://example.com/repo.git",
+		"manifest":{
+			"sandbox":{
+				"filesystem":[{"path":"../secret","access":["read"]}]
+			}
+		}
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "cannot escape repo root") {
+		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}
+
+func TestCreateTaskRejectsAllowlistWithoutRepoHost(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _, adminToken := newSecuredTestServer(t)
+	body := `{
+		"prompt":"do work",
+		"repoUrl":"https://github.com/acme/repo.git",
+		"manifest":{
+			"sandbox":{
+				"network":{"mode":"allowlist","allow":["api.openai.com:443"]}
+			}
+		}
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "must include repo host") {
+		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}
+
+func TestCreateTaskAcceptsAllowlistWithRepoHost(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _, adminToken := newSecuredTestServer(t)
+	body := `{
+		"prompt":"do work",
+		"repoUrl":"https://github.com/acme/repo.git",
+		"manifest":{
+			"sandbox":{
+				"network":{"mode":"allowlist","allow":["github.com:443","api.openai.com:443"]}
+			}
+		}
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestCreateTaskDefaultsAgentToClaude(t *testing.T) {
 	t.Parallel()
 

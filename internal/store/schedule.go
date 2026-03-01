@@ -30,6 +30,7 @@ type Schedule struct {
 	Strategy     Strategy      `json:"strategy"`
 	AgentCount   int           `json:"agentCount"`
 	Image        string        `json:"image"`
+	Manifest     string        `json:"manifest"`
 	State        ScheduleState `json:"state"`
 	LastRunTime  *string       `json:"lastRunTime"`
 	NextRunTime  *string       `json:"nextRunTime"`
@@ -52,6 +53,7 @@ type CreateScheduleParams struct {
 	Strategy     Strategy
 	AgentCount   int
 	Image        string
+	Manifest     string
 	NextRunTime  string
 	MaxRuns      int
 }
@@ -76,13 +78,16 @@ func (s *Store) CreateSchedule(ctx context.Context, id string, p CreateScheduleP
 	if p.Image == "" {
 		p.Image = "orchestrate-agent:latest"
 	}
+	if p.Manifest == "" {
+		p.Manifest = DefaultManifestJSON
+	}
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO schedules (id, owner_user_id, agent, title, description, schedule_expr, schedule_type,
-			prompt, repo_url, base_ref, strategy, agent_count, image, next_run_time, max_runs)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			prompt, repo_url, base_ref, strategy, agent_count, image, manifest, next_run_time, max_runs)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, p.OwnerUserID, p.Agent, p.Title, p.Description, p.ScheduleExpr, p.ScheduleType,
-		p.Prompt, p.RepoURL, p.BaseRef, string(p.Strategy), p.AgentCount, p.Image,
+		p.Prompt, p.RepoURL, p.BaseRef, string(p.Strategy), p.AgentCount, p.Image, p.Manifest,
 		p.NextRunTime, p.MaxRuns,
 	)
 	if err != nil {
@@ -96,12 +101,12 @@ func (s *Store) GetSchedule(ctx context.Context, id string) (*Schedule, error) {
 	sc := &Schedule{}
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, agent, title, description, schedule_expr, schedule_type,
-		       prompt, repo_url, base_ref, strategy, agent_count, image,
+		       prompt, repo_url, base_ref, strategy, agent_count, image, manifest,
 		       state, last_run_time, next_run_time, run_count, max_runs, create_time
 		FROM schedules WHERE id = ?`, id,
 	).Scan(
 		&sc.ID, &sc.OwnerUserID, &sc.Agent, &sc.Title, &sc.Description, &sc.ScheduleExpr, &sc.ScheduleType,
-		&sc.Prompt, &sc.RepoURL, &sc.BaseRef, &sc.Strategy, &sc.AgentCount, &sc.Image,
+		&sc.Prompt, &sc.RepoURL, &sc.BaseRef, &sc.Strategy, &sc.AgentCount, &sc.Image, &sc.Manifest,
 		&sc.State, &sc.LastRunTime, &sc.NextRunTime, &sc.RunCount, &sc.MaxRuns, &sc.CreateTime,
 	)
 	if err == sql.ErrNoRows {
@@ -127,7 +132,7 @@ func (s *Store) ListSchedules(ctx context.Context, p ListSchedulesParams) ([]*Sc
 	}
 
 	query := `SELECT id, owner_user_id, agent, title, description, schedule_expr, schedule_type,
-	                 prompt, repo_url, base_ref, strategy, agent_count, image,
+	                 prompt, repo_url, base_ref, strategy, agent_count, image, manifest,
 	                 state, last_run_time, next_run_time, run_count, max_runs, create_time
 	          FROM schedules`
 	args := []any{}
@@ -168,7 +173,7 @@ func (s *Store) ListSchedules(ctx context.Context, p ListSchedulesParams) ([]*Sc
 		sc := &Schedule{}
 		if err := rows.Scan(
 			&sc.ID, &sc.OwnerUserID, &sc.Agent, &sc.Title, &sc.Description, &sc.ScheduleExpr, &sc.ScheduleType,
-			&sc.Prompt, &sc.RepoURL, &sc.BaseRef, &sc.Strategy, &sc.AgentCount, &sc.Image,
+			&sc.Prompt, &sc.RepoURL, &sc.BaseRef, &sc.Strategy, &sc.AgentCount, &sc.Image, &sc.Manifest,
 			&sc.State, &sc.LastRunTime, &sc.NextRunTime, &sc.RunCount, &sc.MaxRuns, &sc.CreateTime,
 		); err != nil {
 			return nil, fmt.Errorf("scan schedule: %w", err)
@@ -183,7 +188,7 @@ func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]*Schedule, e
 	nowStr := now.UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, owner_user_id, agent, title, description, schedule_expr, schedule_type,
-		       prompt, repo_url, base_ref, strategy, agent_count, image,
+		       prompt, repo_url, base_ref, strategy, agent_count, image, manifest,
 		       state, last_run_time, next_run_time, run_count, max_runs, create_time
 		FROM schedules
 		WHERE state = 'ACTIVE' AND next_run_time IS NOT NULL AND next_run_time <= ?
@@ -199,7 +204,7 @@ func (s *Store) DueSchedules(ctx context.Context, now time.Time) ([]*Schedule, e
 		sc := &Schedule{}
 		if err := rows.Scan(
 			&sc.ID, &sc.OwnerUserID, &sc.Agent, &sc.Title, &sc.Description, &sc.ScheduleExpr, &sc.ScheduleType,
-			&sc.Prompt, &sc.RepoURL, &sc.BaseRef, &sc.Strategy, &sc.AgentCount, &sc.Image,
+			&sc.Prompt, &sc.RepoURL, &sc.BaseRef, &sc.Strategy, &sc.AgentCount, &sc.Image, &sc.Manifest,
 			&sc.State, &sc.LastRunTime, &sc.NextRunTime, &sc.RunCount, &sc.MaxRuns, &sc.CreateTime,
 		); err != nil {
 			return nil, fmt.Errorf("scan due schedule: %w", err)

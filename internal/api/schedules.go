@@ -12,17 +12,18 @@ import (
 )
 
 type createScheduleRequest struct {
-	Agent        string `json:"agent"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	ScheduleExpr string `json:"scheduleExpr"`
-	Prompt       string `json:"prompt"`
-	RepoURL      string `json:"repoUrl"`
-	BaseRef      string `json:"baseRef"`
-	Strategy     string `json:"strategy"`
-	AgentCount   int    `json:"agentCount"`
-	Image        string `json:"image"`
-	MaxRuns      int    `json:"maxRuns"`
+	Agent        string                    `json:"agent"`
+	Title        string                    `json:"title"`
+	Description  string                    `json:"description"`
+	ScheduleExpr string                    `json:"scheduleExpr"`
+	Prompt       string                    `json:"prompt"`
+	RepoURL      string                    `json:"repoUrl"`
+	BaseRef      string                    `json:"baseRef"`
+	Strategy     string                    `json:"strategy"`
+	AgentCount   int                       `json:"agentCount"`
+	Image        string                    `json:"image"`
+	MaxRuns      int                       `json:"maxRuns"`
+	Manifest     *store.PermissionManifest `json:"manifest,omitempty"`
 }
 
 type updateScheduleRequest struct {
@@ -31,24 +32,25 @@ type updateScheduleRequest struct {
 }
 
 type scheduleResponse struct {
-	Name         string  `json:"name"`
-	Agent        string  `json:"agent"`
-	Title        string  `json:"title"`
-	Description  string  `json:"description"`
-	ScheduleExpr string  `json:"scheduleExpr"`
-	ScheduleType string  `json:"scheduleType"`
-	Prompt       string  `json:"prompt"`
-	RepoURL      string  `json:"repoUrl"`
-	BaseRef      string  `json:"baseRef"`
-	Strategy     string  `json:"strategy"`
-	AgentCount   int     `json:"agentCount"`
-	Image        string  `json:"image"`
-	State        string  `json:"state"`
-	LastRunTime  *string `json:"lastRunTime"`
-	NextRunTime  *string `json:"nextRunTime"`
-	RunCount     int     `json:"runCount"`
-	MaxRuns      int     `json:"maxRuns"`
-	CreateTime   string  `json:"createTime"`
+	Name         string                   `json:"name"`
+	Agent        string                   `json:"agent"`
+	Title        string                   `json:"title"`
+	Description  string                   `json:"description"`
+	ScheduleExpr string                   `json:"scheduleExpr"`
+	ScheduleType string                   `json:"scheduleType"`
+	Prompt       string                   `json:"prompt"`
+	RepoURL      string                   `json:"repoUrl"`
+	BaseRef      string                   `json:"baseRef"`
+	Strategy     string                   `json:"strategy"`
+	AgentCount   int                      `json:"agentCount"`
+	Image        string                   `json:"image"`
+	Manifest     store.PermissionManifest `json:"manifest,omitempty"`
+	State        string                   `json:"state"`
+	LastRunTime  *string                  `json:"lastRunTime"`
+	NextRunTime  *string                  `json:"nextRunTime"`
+	RunCount     int                      `json:"runCount"`
+	MaxRuns      int                      `json:"maxRuns"`
+	CreateTime   string                   `json:"createTime"`
 }
 
 func toScheduleResponse(sc *store.Schedule) scheduleResponse {
@@ -65,6 +67,7 @@ func toScheduleResponse(sc *store.Schedule) scheduleResponse {
 		Strategy:     string(sc.Strategy),
 		AgentCount:   sc.AgentCount,
 		Image:        sc.Image,
+		Manifest:     parseStoredManifest(sc.Manifest),
 		State:        string(sc.State),
 		LastRunTime:  sc.LastRunTime,
 		NextRunTime:  sc.NextRunTime,
@@ -138,6 +141,11 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	_, manifestJSON, err := normalizeAndMarshalManifest(req.Manifest, req.RepoURL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Validate and parse schedule expression
 	spec, err := schedule.Parse(req.ScheduleExpr)
@@ -163,6 +171,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		Strategy:     strategy,
 		AgentCount:   agentCount,
 		Image:        image,
+		Manifest:     manifestJSON,
 		NextRunTime:  next.UTC().Format("2006-01-02T15:04:05Z"),
 		MaxRuns:      req.MaxRuns,
 	})

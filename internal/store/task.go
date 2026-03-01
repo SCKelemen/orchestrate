@@ -45,6 +45,7 @@ type Task struct {
 	Priority    int       `json:"priority"`
 	State       TaskState `json:"state"`
 	Image       string    `json:"image"`
+	Manifest    string    `json:"manifest"`
 	CreateTime  string    `json:"createTime"`
 	StartTime   *string   `json:"startTime"`
 	EndTime     *string   `json:"endTime"`
@@ -63,6 +64,7 @@ type CreateTaskParams struct {
 	AgentCount  int
 	Priority    int
 	Image       string
+	Manifest    string
 }
 
 // CreateTask inserts a new task and returns it.
@@ -85,12 +87,15 @@ func (s *Store) CreateTask(ctx context.Context, id string, p CreateTaskParams) (
 	if p.Image == "" {
 		p.Image = "orchestrate-agent:latest"
 	}
+	if p.Manifest == "" {
+		p.Manifest = DefaultManifestJSON
+	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO tasks (id, owner_user_id, agent, title, description, prompt, repo_url, base_ref, strategy, agent_count, priority, image)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO tasks (id, owner_user_id, agent, title, description, prompt, repo_url, base_ref, strategy, agent_count, priority, image, manifest)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, p.OwnerUserID, p.Agent, p.Title, p.Description, p.Prompt, p.RepoURL, p.BaseRef,
-		string(p.Strategy), p.AgentCount, p.Priority, p.Image,
+		string(p.Strategy), p.AgentCount, p.Priority, p.Image, p.Manifest,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert task: %w", err)
@@ -103,12 +108,12 @@ func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
 	t := &Task{}
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, agent, title, description, prompt, repo_url, base_ref,
-		       strategy, agent_count, priority, state, image,
+		       strategy, agent_count, priority, state, image, manifest,
 		       create_time, start_time, end_time
 		FROM tasks WHERE id = ?`, id,
 	).Scan(
 		&t.ID, &t.OwnerUserID, &t.Agent, &t.Title, &t.Description, &t.Prompt, &t.RepoURL, &t.BaseRef,
-		&t.Strategy, &t.AgentCount, &t.Priority, &t.State, &t.Image,
+		&t.Strategy, &t.AgentCount, &t.Priority, &t.State, &t.Image, &t.Manifest,
 		&t.CreateTime, &t.StartTime, &t.EndTime,
 	)
 	if err == sql.ErrNoRows {
@@ -135,7 +140,7 @@ func (s *Store) ListTasks(ctx context.Context, p ListTasksParams) ([]*Task, erro
 	}
 
 	query := `SELECT id, owner_user_id, agent, title, description, prompt, repo_url, base_ref,
-	                 strategy, agent_count, priority, state, image,
+	                 strategy, agent_count, priority, state, image, manifest,
 	                 create_time, start_time, end_time
 	          FROM tasks`
 	args := []any{}
@@ -176,7 +181,7 @@ func (s *Store) ListTasks(ctx context.Context, p ListTasksParams) ([]*Task, erro
 		t := &Task{}
 		if err := rows.Scan(
 			&t.ID, &t.OwnerUserID, &t.Agent, &t.Title, &t.Description, &t.Prompt, &t.RepoURL, &t.BaseRef,
-			&t.Strategy, &t.AgentCount, &t.Priority, &t.State, &t.Image,
+			&t.Strategy, &t.AgentCount, &t.Priority, &t.State, &t.Image, &t.Manifest,
 			&t.CreateTime, &t.StartTime, &t.EndTime,
 		); err != nil {
 			return nil, fmt.Errorf("scan task: %w", err)

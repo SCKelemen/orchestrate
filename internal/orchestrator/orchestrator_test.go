@@ -181,6 +181,56 @@ func TestExecuteAgentFailsForUnsupportedBackend(t *testing.T) {
 	}
 }
 
+func TestExecuteAgentAppliesManifestSandboxPolicy(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	task, err := s.CreateTask(ctx, "t-manifest-policy", store.CreateTaskParams{
+		OwnerUserID: "u1",
+		Agent:       "claude",
+		Prompt:      "do work",
+		RepoURL:     "https://example.com/repo.git",
+		Strategy:    store.StrategyImplement,
+		AgentCount:  1,
+		Image:       "orchestrate-agent:latest",
+		Manifest:    `{"sandbox":{"filesystem":[{"path":"src","access":["read","write"]}],"network":{"mode":"none"}}}`,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	sb := &testSandbox{}
+	ag := &testAgent{result: &agent.Result{ExitCode: 0, Output: "ok"}}
+	orch := New(
+		s,
+		sb,
+		map[string]agent.Agent{
+			agent.BackendClaude: ag,
+		},
+		agent.BackendClaude,
+		t.TempDir(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	_, err = orch.executeAgent(ctx, task, AgentPlan{
+		Index:  0,
+		Branch: "feature/test",
+		Prompt: "hello from test",
+	})
+	if err != nil {
+		t.Fatalf("execute agent: %v", err)
+	}
+
+	if sb.lastCreate.NetworkMode != sandbox.NetworkModeNone {
+		t.Fatalf("network mode=%q want=%q", sb.lastCreate.NetworkMode, sandbox.NetworkModeNone)
+	}
+	if len(sb.lastCreate.VisibleRepoPaths) != 1 || sb.lastCreate.VisibleRepoPaths[0] != "src" {
+		t.Fatalf("visible paths=%v want=[src]", sb.lastCreate.VisibleRepoPaths)
+	}
+}
+
 func TestExecuteAdversarialUsesSingleWorkspaceHandoff(t *testing.T) {
 	t.Parallel()
 

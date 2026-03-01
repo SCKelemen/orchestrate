@@ -206,25 +206,7 @@ func loadOrGenerateSecret(dir string) ([]byte, error) {
 }
 
 func parseCSVEnv(key string) []string {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	seen := map[string]struct{}{}
-	for _, p := range parts {
-		v := strings.TrimSpace(p)
-		if v == "" {
-			continue
-		}
-		if _, ok := seen[v]; ok {
-			continue
-		}
-		seen[v] = struct{}{}
-		out = append(out, v)
-	}
-	return out
+	return parseCSV(os.Getenv(key))
 }
 
 func parseBoolEnv(key string) bool {

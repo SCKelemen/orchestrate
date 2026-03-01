@@ -59,6 +59,33 @@ func TestTaskCreateAndGet(t *testing.T) {
 	}
 }
 
+func TestTaskManifestRoundTrip(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	manifest := `{"sandbox":{"filesystem":[{"path":"src","access":["read","write"]}],"network":{"mode":"none"}}}`
+	task, err := s.CreateTask(ctx, "t-manifest", CreateTaskParams{
+		Prompt:   "do something",
+		RepoURL:  "https://github.com/test/repo",
+		Manifest: manifest,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if task.Manifest != manifest {
+		t.Fatalf("manifest=%q want=%q", task.Manifest, manifest)
+	}
+
+	got, err := s.GetTask(ctx, "t-manifest")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Manifest != manifest {
+		t.Fatalf("manifest=%q want=%q", got.Manifest, manifest)
+	}
+}
+
 func TestGetTaskNotFound(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
@@ -329,6 +356,36 @@ func TestScheduleCreateAndGet(t *testing.T) {
 	got, _ := s.GetSchedule(ctx, "s1")
 	if got.ScheduleExpr != "0 0 * * *" {
 		t.Errorf("scheduleExpr = %q", got.ScheduleExpr)
+	}
+}
+
+func TestScheduleManifestRoundTrip(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	manifest := `{"sandbox":{"filesystem":[{"path":"pkg","access":["read"]}],"network":{"mode":"allowlist","allow":["github.com:443"]}}}`
+	sc, err := s.CreateSchedule(ctx, "s-manifest", CreateScheduleParams{
+		ScheduleExpr: "0 * * * *",
+		ScheduleType: "CRON",
+		Prompt:       "scheduled work",
+		RepoURL:      "https://github.com/test/repo",
+		NextRunTime:  time.Now().UTC().Format(time.RFC3339),
+		Manifest:     manifest,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if sc.Manifest != manifest {
+		t.Fatalf("manifest=%q want=%q", sc.Manifest, manifest)
+	}
+
+	got, err := s.GetSchedule(ctx, "s-manifest")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Manifest != manifest {
+		t.Fatalf("manifest=%q want=%q", got.Manifest, manifest)
 	}
 }
 

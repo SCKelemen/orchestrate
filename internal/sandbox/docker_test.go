@@ -117,6 +117,25 @@ func TestCreateArgsWithNetworkNone(t *testing.T) {
 	}
 }
 
+func TestCreateArgsWithNetworkAllowlistDoesNotDisableNetwork(t *testing.T) {
+	t.Parallel()
+
+	d := NewDocker("/tmp/orchestrate")
+	args := d.createArgs(CreateOpts{
+		Image:                "orchestrate-agent:latest",
+		NetworkMode:          NetworkModeAllowlist,
+		AllowedEgressDomains: []string{"github.com:443", "api.openai.com:443"},
+	}, "orch-allow")
+
+	if containsArgPair(args, "--network", "none") {
+		t.Fatalf("did not expect --network none for allowlist mode: %#v", args)
+	}
+	env := parseEnvArgs(args)
+	if env["ORCHESTRATE_EGRESS_ALLOWLIST"] != "api.openai.com:443,github.com:443" {
+		t.Fatalf("ORCHESTRATE_EGRESS_ALLOWLIST=%q", env["ORCHESTRATE_EGRESS_ALLOWLIST"])
+	}
+}
+
 func TestWithAllowAnyImage(t *testing.T) {
 	t.Parallel()
 
@@ -135,6 +154,38 @@ func TestWithAllowedImages(t *testing.T) {
 	}
 	if !d.imageAllowed("ghcr.io/acme/orchestrate-agent:v1") {
 		t.Fatal("configured image should be allowed")
+	}
+}
+
+func TestSanitizeVisiblePaths(t *testing.T) {
+	t.Parallel()
+
+	paths, err := sanitizeVisiblePaths([]string{"src", "./pkg", "src", "tests"})
+	if err != nil {
+		t.Fatalf("sanitizeVisiblePaths: %v", err)
+	}
+	if len(paths) != 3 {
+		t.Fatalf("len=%d want=3 paths=%v", len(paths), paths)
+	}
+}
+
+func TestSanitizeVisiblePathsRejectsTraversal(t *testing.T) {
+	t.Parallel()
+
+	if _, err := sanitizeVisiblePaths([]string{"../secret"}); err == nil {
+		t.Fatal("expected traversal error")
+	}
+}
+
+func TestDomainListIncludesHost(t *testing.T) {
+	t.Parallel()
+
+	allow := []string{"github.com:443", "api.openai.com"}
+	if !domainListIncludesHost(allow, "github.com") {
+		t.Fatal("github.com should be allowed")
+	}
+	if domainListIncludesHost(allow, "example.com") {
+		t.Fatal("example.com should not be allowed")
 	}
 }
 

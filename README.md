@@ -29,6 +29,7 @@ Orchestrate gives you:
 - Optionally enable WebAuthn
 - Optionally enable device + browser auth-code flows (explicitly disabled by default)
 - Route work to common agent backends: `claude` (`anthropic` alias) and `codex` (`openai` alias)
+- Attach sandbox permission manifests (filesystem scope + network policy)
 
 ## How To Use It
 
@@ -86,7 +87,10 @@ export ORCHESTRATE_TOKEN="$(cat ~/.local/share/orchestrate/token)"
   --repo https://github.com/your-org/your-repo.git \
   --base-ref main \
   --strategy IMPLEMENT \
-  --agents 1
+  --agents 1 \
+  --fs-paths "cmd,internal" \
+  --network-mode allowlist \
+  --egress-domains "github.com:443,api.anthropic.com:443"
 ```
 
 ### 7. Inspect progress
@@ -196,6 +200,8 @@ The Docker sandbox is hardened by default:
 - Only backend-relevant secrets are injected into a run (`ANTHROPIC_*` for Claude, `OPENAI_*` for Codex)
 - Enforces image allowlist at API submit time and sandbox runtime
 - Supports explicit network isolation mode (`ORCHESTRATE_SANDBOX_NETWORK=none`)
+- Supports manifest-based sparse repo visibility (`manifest.sandbox.filesystem`)
+- Supports manifest network policies (`default`, `none`, `allowlist`)
 
 Additional auth/security controls:
 
@@ -213,6 +219,8 @@ Important deployment notes for public-facing use:
 - Restrict outbound network egress at the host/VPC layer.
 - Keep API keys scoped and minimal.
 - Put the API behind HTTPS + a reverse proxy with rate limiting.
+
+Manifest network `allowlist` currently enforces admission checks (required hosts must be declared) and audit env propagation. Full kernel-level egress filtering still requires host/VPC controls.
 
 ## Testing and CI/CD
 

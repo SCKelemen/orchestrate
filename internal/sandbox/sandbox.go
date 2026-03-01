@@ -13,11 +13,14 @@ type Workspace struct {
 
 // CreateOpts are options for creating a sandbox workspace.
 type CreateOpts struct {
-	Image   string
-	RepoURL string
-	BaseRef string
-	Branch  string
-	EnvVars map[string]string
+	Image                string
+	RepoURL              string
+	BaseRef              string
+	Branch               string
+	EnvVars              map[string]string
+	VisibleRepoPaths     []string
+	NetworkMode          NetworkMode
+	AllowedEgressDomains []string
 }
 
 // ExecResult holds the output of a command execution in a sandbox.

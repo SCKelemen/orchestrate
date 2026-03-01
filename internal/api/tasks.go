@@ -15,16 +15,17 @@ import (
 
 // createTaskRequest is the JSON body for CreateTask.
 type createTaskRequest struct {
-	Agent       string `json:"agent"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Prompt      string `json:"prompt"`
-	RepoURL     string `json:"repoUrl"`
-	BaseRef     string `json:"baseRef"`
-	Strategy    string `json:"strategy"`
-	AgentCount  int    `json:"agentCount"`
-	Priority    int    `json:"priority"`
-	Image       string `json:"image"`
+	Agent       string                    `json:"agent"`
+	Title       string                    `json:"title"`
+	Description string                    `json:"description"`
+	Prompt      string                    `json:"prompt"`
+	RepoURL     string                    `json:"repoUrl"`
+	BaseRef     string                    `json:"baseRef"`
+	Strategy    string                    `json:"strategy"`
+	AgentCount  int                       `json:"agentCount"`
+	Priority    int                       `json:"priority"`
+	Image       string                    `json:"image"`
+	Manifest    *store.PermissionManifest `json:"manifest,omitempty"`
 }
 
 // updateTaskRequest is the JSON body for UpdateTask.
@@ -36,21 +37,22 @@ type updateTaskRequest struct {
 
 // taskResponse wraps a task for AIP-style JSON output.
 type taskResponse struct {
-	Name        string  `json:"name"`
-	Agent       string  `json:"agent"`
-	Title       string  `json:"title"`
-	Description string  `json:"description"`
-	Prompt      string  `json:"prompt"`
-	RepoURL     string  `json:"repoUrl"`
-	BaseRef     string  `json:"baseRef"`
-	Strategy    string  `json:"strategy"`
-	AgentCount  int     `json:"agentCount"`
-	Priority    int     `json:"priority"`
-	State       string  `json:"state"`
-	Image       string  `json:"image"`
-	CreateTime  string  `json:"createTime"`
-	StartTime   *string `json:"startTime"`
-	EndTime     *string `json:"endTime"`
+	Name        string                   `json:"name"`
+	Agent       string                   `json:"agent"`
+	Title       string                   `json:"title"`
+	Description string                   `json:"description"`
+	Prompt      string                   `json:"prompt"`
+	RepoURL     string                   `json:"repoUrl"`
+	BaseRef     string                   `json:"baseRef"`
+	Strategy    string                   `json:"strategy"`
+	AgentCount  int                      `json:"agentCount"`
+	Priority    int                      `json:"priority"`
+	State       string                   `json:"state"`
+	Image       string                   `json:"image"`
+	Manifest    store.PermissionManifest `json:"manifest,omitempty"`
+	CreateTime  string                   `json:"createTime"`
+	StartTime   *string                  `json:"startTime"`
+	EndTime     *string                  `json:"endTime"`
 }
 
 func toTaskResponse(t *store.Task) taskResponse {
@@ -67,6 +69,7 @@ func toTaskResponse(t *store.Task) taskResponse {
 		Priority:    t.Priority,
 		State:       string(t.State),
 		Image:       t.Image,
+		Manifest:    parseStoredManifest(t.Manifest),
 		CreateTime:  t.CreateTime,
 		StartTime:   t.StartTime,
 		EndTime:     t.EndTime,
@@ -155,6 +158,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	_, manifestJSON, err := normalizeAndMarshalManifest(req.Manifest, req.RepoURL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	id := newID()
 	task, err := s.store.CreateTask(r.Context(), id, store.CreateTaskParams{
@@ -169,6 +177,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		AgentCount:  agentCount,
 		Priority:    req.Priority,
 		Image:       image,
+		Manifest:    manifestJSON,
 	})
 	if err != nil {
 		s.logger.Error("create task", "error", err)

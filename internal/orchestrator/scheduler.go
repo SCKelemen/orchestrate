@@ -143,6 +143,7 @@ func (sc *Scheduler) checkSchedules(ctx context.Context) {
 			Strategy:    sched.Strategy,
 			AgentCount:  sched.AgentCount,
 			Image:       sched.Image,
+			Manifest:    sched.Manifest,
 		})
 		if err != nil {
 			sc.logger.Error("create scheduled task failed", "schedule", sched.ID, "error", err)

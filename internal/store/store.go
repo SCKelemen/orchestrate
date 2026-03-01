@@ -41,11 +41,17 @@ func (s *Store) migrate() error {
 	if err := s.ensureColumn("tasks", "agent", "TEXT NOT NULL DEFAULT 'claude'"); err != nil {
 		return fmt.Errorf("ensure tasks.agent: %w", err)
 	}
+	if err := s.ensureColumn("tasks", "manifest", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return fmt.Errorf("ensure tasks.manifest: %w", err)
+	}
 	if err := s.ensureColumn("schedules", "owner_user_id", "TEXT NOT NULL DEFAULT 'system'"); err != nil {
 		return fmt.Errorf("ensure schedules.owner_user_id: %w", err)
 	}
 	if err := s.ensureColumn("schedules", "agent", "TEXT NOT NULL DEFAULT 'claude'"); err != nil {
 		return fmt.Errorf("ensure schedules.agent: %w", err)
+	}
+	if err := s.ensureColumn("schedules", "manifest", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return fmt.Errorf("ensure schedules.manifest: %w", err)
 	}
 	if _, err := s.db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_tasks_owner_state_priority
@@ -104,6 +110,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 	priority    INTEGER NOT NULL DEFAULT 0,
 	state       TEXT NOT NULL DEFAULT 'QUEUED',
 	image       TEXT NOT NULL DEFAULT 'orchestrate-agent:latest',
+	manifest    TEXT NOT NULL DEFAULT '{}',
 	create_time TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
 	start_time  TEXT,
 	end_time    TEXT
@@ -142,6 +149,7 @@ CREATE TABLE IF NOT EXISTS schedules (
 	strategy      TEXT NOT NULL DEFAULT 'IMPLEMENT',
 	agent_count   INTEGER NOT NULL DEFAULT 1,
 	image         TEXT NOT NULL DEFAULT 'orchestrate-agent:latest',
+	manifest      TEXT NOT NULL DEFAULT '{}',
 	state         TEXT NOT NULL DEFAULT 'ACTIVE',
 	last_run_time TEXT,
 	next_run_time TEXT,
