@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/SCKelemen/clix/v2"
 	"github.com/SCKelemen/orchestrate/internal/agent"
@@ -44,7 +45,7 @@ func newServerCmd() *clix.Command {
 
 		// Ensure subdirectories
 		for _, sub := range []string{"repos", "workspaces", "logs"} {
-			if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
 				return fmt.Errorf("create %s dir: %w", sub, err)
 			}
 		}
@@ -105,6 +106,13 @@ func newServerCmd() *clix.Command {
 
 		// Configure WebAuthn if ORCHESTRATE_WEBAUTHN_RPID is set.
 		var serverOpts []api.ServerOption
+		enableInsecureAuth := strings.EqualFold(os.Getenv("ORCHESTRATE_ENABLE_EMAIL_AUTH"), "1") ||
+			strings.EqualFold(os.Getenv("ORCHESTRATE_ENABLE_EMAIL_AUTH"), "true")
+		serverOpts = append(serverOpts, api.WithInsecureEmailAuth(enableInsecureAuth))
+		if enableInsecureAuth {
+			logger.Warn("insecure email-based auth flows are enabled")
+		}
+
 		if rpID := os.Getenv("ORCHESTRATE_WEBAUTHN_RPID"); rpID != "" {
 			rpName := os.Getenv("ORCHESTRATE_WEBAUTHN_RPNAME")
 			if rpName == "" {
@@ -125,13 +133,16 @@ func newServerCmd() *clix.Command {
 
 		srv := api.NewServer(s, mw, signer, logger, serverOpts...)
 
-		tokenPreview := token
-		if len(tokenPreview) > 8 {
-			tokenPreview = tokenPreview[:8] + "..."
-		}
-		logger.Info("server starting", "addr", addr, "token", tokenPreview)
+		logger.Info("server starting", "addr", addr)
 
-		server := &http.Server{Addr: addr, Handler: srv}
+		server := &http.Server{
+			Addr:              addr,
+			Handler:           srv,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      60 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
 		go func() {
 			<-ctx.Done()
 			server.Close()

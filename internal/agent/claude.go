@@ -53,7 +53,7 @@ func (c *Claude) Run(ctx context.Context, ws *sandbox.Workspace, prompt string, 
 
 	// Write log file if requested
 	if opts.LogPath != "" {
-		_ = os.WriteFile(opts.LogPath, []byte(res.Stdout+"\n---STDERR---\n"+res.Stderr), 0o644)
+		_ = os.WriteFile(opts.LogPath, []byte(res.Stdout+"\n---STDERR---\n"+res.Stderr), 0o600)
 	}
 
 	return result, nil

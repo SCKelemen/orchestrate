@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/SCKelemen/orchestrate/internal/auth"
 	"github.com/SCKelemen/orchestrate/internal/store"
 )
 
@@ -36,11 +37,20 @@ func toRunResponse(taskID string, r *store.Run) runResponse {
 }
 
 func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	taskID := r.PathValue("task")
 
 	task, err := s.store.GetTask(r.Context(), taskID)
 	if err != nil || task == nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("task not found: %s", taskID))
+		return
+	}
+	if !authorizeTaskAccess(w, idn, task) {
 		return
 	}
 
@@ -59,8 +69,23 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	taskID := r.PathValue("task")
 	runID := r.PathValue("run")
+
+	task, err := s.store.GetTask(r.Context(), taskID)
+	if err != nil || task == nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("task not found: %s", taskID))
+		return
+	}
+	if !authorizeTaskAccess(w, idn, task) {
+		return
+	}
 
 	run, err := s.store.GetRun(r.Context(), runID)
 	if err != nil || run == nil || run.TaskID != taskID {
@@ -72,8 +97,23 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 
 // streamLogs streams agent output as server-sent events.
 func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	taskID := r.PathValue("task")
 	runID := r.PathValue("run")
+
+	task, err := s.store.GetTask(r.Context(), taskID)
+	if err != nil || task == nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("task not found: %s", taskID))
+		return
+	}
+	if !authorizeTaskAccess(w, idn, task) {
+		return
+	}
 
 	run, err := s.store.GetRun(r.Context(), runID)
 	if err != nil || run == nil || run.TaskID != taskID {

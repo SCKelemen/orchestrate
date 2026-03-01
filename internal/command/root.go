@@ -23,7 +23,7 @@ func dataDir() string {
 // openStore opens the SQLite store in the data directory.
 func openStore() (*store.Store, error) {
 	dir := dataDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 	return store.Open(filepath.Join(dir, "orchestrate.db"))

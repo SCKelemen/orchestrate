@@ -31,15 +31,62 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(schema)
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("tasks", "owner_user_id", "TEXT NOT NULL DEFAULT 'system'"); err != nil {
+		return fmt.Errorf("ensure tasks.owner_user_id: %w", err)
+	}
+	if err := s.ensureColumn("schedules", "owner_user_id", "TEXT NOT NULL DEFAULT 'system'"); err != nil {
+		return fmt.Errorf("ensure schedules.owner_user_id: %w", err)
+	}
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_tasks_owner_state_priority
+			ON tasks(owner_user_id, state, priority DESC, create_time ASC);
+		CREATE INDEX IF NOT EXISTS idx_schedules_owner_state_next
+			ON schedules(owner_user_id, state, next_run_time);
+	`); err != nil {
+		return fmt.Errorf("create owner indexes: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ensureColumn(table, column, columnDef string) error {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var (
+		cid        int
+		name       string
+		colType    string
+		notNull    int
+		defaultVal sql.NullString
+		pk         int
+	)
+	for rows.Next() {
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultVal, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, columnDef))
 	return err
 }
 
 const schema = `
 CREATE TABLE IF NOT EXISTS tasks (
 	id          TEXT PRIMARY KEY,
+	owner_user_id TEXT NOT NULL DEFAULT 'system',
 	title       TEXT NOT NULL DEFAULT '',
 	description TEXT NOT NULL DEFAULT '',
 	prompt      TEXT NOT NULL,
@@ -76,6 +123,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
 
 CREATE TABLE IF NOT EXISTS schedules (
 	id            TEXT PRIMARY KEY,
+	owner_user_id TEXT NOT NULL DEFAULT 'system',
 	title         TEXT NOT NULL DEFAULT '',
 	description   TEXT NOT NULL DEFAULT '',
 	schedule_expr TEXT NOT NULL,

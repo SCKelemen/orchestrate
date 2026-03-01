@@ -31,6 +31,7 @@ const (
 // Task represents a unit of work for one or more agents.
 type Task struct {
 	ID          string    `json:"name"`
+	OwnerUserID string    `json:"ownerUserId"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	Prompt      string    `json:"prompt"`
@@ -48,6 +49,7 @@ type Task struct {
 
 // CreateTaskParams holds parameters for creating a new task.
 type CreateTaskParams struct {
+	OwnerUserID string
 	Title       string
 	Description string
 	Prompt      string
@@ -61,6 +63,9 @@ type CreateTaskParams struct {
 
 // CreateTask inserts a new task and returns it.
 func (s *Store) CreateTask(ctx context.Context, id string, p CreateTaskParams) (*Task, error) {
+	if p.OwnerUserID == "" {
+		p.OwnerUserID = "system"
+	}
 	if p.BaseRef == "" {
 		p.BaseRef = "main"
 	}
@@ -75,9 +80,9 @@ func (s *Store) CreateTask(ctx context.Context, id string, p CreateTaskParams) (
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO tasks (id, title, description, prompt, repo_url, base_ref, strategy, agent_count, priority, image)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, p.Title, p.Description, p.Prompt, p.RepoURL, p.BaseRef,
+		INSERT INTO tasks (id, owner_user_id, title, description, prompt, repo_url, base_ref, strategy, agent_count, priority, image)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, p.OwnerUserID, p.Title, p.Description, p.Prompt, p.RepoURL, p.BaseRef,
 		string(p.Strategy), p.AgentCount, p.Priority, p.Image,
 	)
 	if err != nil {
@@ -90,12 +95,12 @@ func (s *Store) CreateTask(ctx context.Context, id string, p CreateTaskParams) (
 func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
 	t := &Task{}
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, title, description, prompt, repo_url, base_ref,
+		SELECT id, owner_user_id, title, description, prompt, repo_url, base_ref,
 		       strategy, agent_count, priority, state, image,
 		       create_time, start_time, end_time
 		FROM tasks WHERE id = ?`, id,
 	).Scan(
-		&t.ID, &t.Title, &t.Description, &t.Prompt, &t.RepoURL, &t.BaseRef,
+		&t.ID, &t.OwnerUserID, &t.Title, &t.Description, &t.Prompt, &t.RepoURL, &t.BaseRef,
 		&t.Strategy, &t.AgentCount, &t.Priority, &t.State, &t.Image,
 		&t.CreateTime, &t.StartTime, &t.EndTime,
 	)
@@ -110,9 +115,10 @@ func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
 
 // ListTasksParams holds filter/pagination parameters.
 type ListTasksParams struct {
-	State     TaskState
-	PageSize  int
-	PageToken string // task ID to start after
+	OwnerUserID string
+	State       TaskState
+	PageSize    int
+	PageToken   string // task ID to start after
 }
 
 // ListTasks returns tasks matching the given filter, ordered by priority desc then create_time asc.
@@ -121,13 +127,17 @@ func (s *Store) ListTasks(ctx context.Context, p ListTasksParams) ([]*Task, erro
 		p.PageSize = 20
 	}
 
-	query := `SELECT id, title, description, prompt, repo_url, base_ref,
+	query := `SELECT id, owner_user_id, title, description, prompt, repo_url, base_ref,
 	                 strategy, agent_count, priority, state, image,
 	                 create_time, start_time, end_time
 	          FROM tasks`
 	args := []any{}
 
 	var where []string
+	if p.OwnerUserID != "" {
+		where = append(where, "owner_user_id = ?")
+		args = append(args, p.OwnerUserID)
+	}
 	if p.State != "" {
 		where = append(where, "state = ?")
 		args = append(args, string(p.State))
@@ -158,7 +168,7 @@ func (s *Store) ListTasks(ctx context.Context, p ListTasksParams) ([]*Task, erro
 	for rows.Next() {
 		t := &Task{}
 		if err := rows.Scan(
-			&t.ID, &t.Title, &t.Description, &t.Prompt, &t.RepoURL, &t.BaseRef,
+			&t.ID, &t.OwnerUserID, &t.Title, &t.Description, &t.Prompt, &t.RepoURL, &t.BaseRef,
 			&t.Strategy, &t.AgentCount, &t.Priority, &t.State, &t.Image,
 			&t.CreateTime, &t.StartTime, &t.EndTime,
 		); err != nil {

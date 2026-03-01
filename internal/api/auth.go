@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,30 +54,23 @@ func (s *Server) registerAuthRoutes() {
 	s.mux.HandleFunc("POST /v1/auth/token/{action}", s.handleTokenAction)
 	s.mux.HandleFunc("GET /v1/auth/userinfo", s.auth.Wrap(s.handleUserInfo))
 
-	// Mark token endpoints as public
-	s.auth.AddPublicPath("/v1/auth/token")
-
 	// Device flow endpoints
 	s.mux.HandleFunc("POST /v1/auth/device", s.handleDeviceAuthorize)
 	s.mux.HandleFunc("POST /v1/auth/device/{action}", s.handleDeviceAction)
 	s.mux.HandleFunc("GET /v1/auth/device/verify", s.handleDeviceVerifyPage)
 	s.mux.HandleFunc("POST /v1/auth/device/verify", s.handleDeviceVerifySubmit)
-	s.auth.AddPublicPath("/v1/auth/device")
 
 	// Authorization Code + PKCE endpoints
 	s.mux.HandleFunc("GET /v1/auth/authorize", s.handleAuthorizePage)
 	s.mux.HandleFunc("POST /v1/auth/authorize", s.handleAuthorizeSubmit)
-	s.auth.AddPublicPath("/v1/auth/authorize")
 
 	// CIBA endpoints
 	s.mux.HandleFunc("POST /v1/auth/ciba", s.auth.Wrap(s.handleCIBAInitiate))
 	s.mux.HandleFunc("POST /v1/auth/ciba/{action}", s.handleCIBAAction)
-	s.auth.AddPublicPath("/v1/auth/ciba")
 
 	// WebAuthn endpoints
 	s.mux.HandleFunc("POST /v1/auth/webauthn/register/{action}", s.auth.Wrap(s.handleWebAuthnRegister))
 	s.mux.HandleFunc("POST /v1/auth/webauthn/login/{action}", s.handleWebAuthnLogin)
-	s.auth.AddPublicPath("/v1/auth/webauthn")
 
 	// User management
 	s.mux.HandleFunc("POST /v1/users", s.auth.Wrap(s.createUser))
@@ -461,6 +455,11 @@ func (s *Server) issueTokenPair(r *http.Request, id *auth.Identity) (*tokenRespo
 // RFC 8628 Section 3.1 - Device Authorization Request
 // https://datatracker.ietf.org/doc/html/rfc8628#section-3.1
 func (s *Server) handleDeviceAuthorize(w http.ResponseWriter, r *http.Request) {
+	if !s.allowInsecureAuth {
+		writeError(w, http.StatusForbidden, "device flow is disabled")
+		return
+	}
+
 	var req struct {
 		ClientID string `json:"client_id"`
 		Scope    string `json:"scope"`
@@ -598,6 +597,11 @@ func (s *Server) handleDevicePoll(w http.ResponseWriter, r *http.Request) {
 // handleDeviceVerifyPage renders the device code verification page.
 // GET /v1/auth/device/verify
 func (s *Server) handleDeviceVerifyPage(w http.ResponseWriter, r *http.Request) {
+	if !s.allowInsecureAuth {
+		writeError(w, http.StatusForbidden, "device flow is disabled")
+		return
+	}
+
 	userCode := r.URL.Query().Get("user_code")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<!DOCTYPE html>
@@ -619,6 +623,11 @@ button{padding:10px 24px;cursor:pointer}</style></head>
 // handleDeviceVerifySubmit processes the device code verification form.
 // POST /v1/auth/device/verify
 func (s *Server) handleDeviceVerifySubmit(w http.ResponseWriter, r *http.Request) {
+	if !s.allowInsecureAuth {
+		writeError(w, http.StatusForbidden, "device flow is disabled")
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid form data")
 		return
@@ -756,6 +765,11 @@ func (s *Server) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Request, r
 // handleAuthorizePage renders a minimal login form.
 // GET /v1/auth/authorize?response_type=code&client_id=...&redirect_uri=...&code_challenge=...&code_challenge_method=S256&state=...
 func (s *Server) handleAuthorizePage(w http.ResponseWriter, r *http.Request) {
+	if !s.allowInsecureAuth {
+		writeError(w, http.StatusForbidden, "authorization code login flow is disabled")
+		return
+	}
+
 	q := r.URL.Query()
 	if q.Get("response_type") != "code" {
 		writeError(w, http.StatusBadRequest, "response_type must be 'code'")
@@ -797,6 +811,11 @@ button{padding:10px 24px;cursor:pointer}</style></head>
 // handleAuthorizeSubmit processes the login form and redirects with an auth code.
 // POST /v1/auth/authorize (form data)
 func (s *Server) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
+	if !s.allowInsecureAuth {
+		writeError(w, http.StatusForbidden, "authorization code login flow is disabled")
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid form data")
 		return
@@ -999,6 +1018,12 @@ func (s *Server) handleCIBAInitiate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "login_hint is required (user email)")
 		return
 	}
+	if req.WebhookURL != "" {
+		if err := validateWebhookURL(req.WebhookURL); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid webhook_url: "+err.Error())
+			return
+		}
+	}
 
 	// Find user by login_hint (email)
 	user, err := s.store.GetUserByEmail(r.Context(), req.LoginHint)
@@ -1128,6 +1153,24 @@ func (s *Server) handleCIBAApprove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	if req.AuthReqID == "" {
+		writeError(w, http.StatusBadRequest, "auth_req_id is required")
+		return
+	}
+	id, err := s.auth.Authenticate(r)
+	if err != nil || id == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	cr, err := s.store.GetCIBARequest(r.Context(), req.AuthReqID)
+	if err != nil || cr == nil {
+		writeError(w, http.StatusBadRequest, "invalid auth_req_id")
+		return
+	}
+	if !isAdminIdentity(id) && id.UserID != cr.UserID {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	if err := s.store.ApproveCIBARequest(r.Context(), req.AuthReqID); err != nil {
 		writeError(w, http.StatusBadRequest, "failed to approve: "+err.Error())
 		return
@@ -1143,6 +1186,24 @@ func (s *Server) handleCIBADeny(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.AuthReqID == "" {
+		writeError(w, http.StatusBadRequest, "auth_req_id is required")
+		return
+	}
+	id, err := s.auth.Authenticate(r)
+	if err != nil || id == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	cr, err := s.store.GetCIBARequest(r.Context(), req.AuthReqID)
+	if err != nil || cr == nil {
+		writeError(w, http.StatusBadRequest, "invalid auth_req_id")
+		return
+	}
+	if !isAdminIdentity(id) && id.UserID != cr.UserID {
+		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
 	if err := s.store.DenyCIBARequest(r.Context(), req.AuthReqID); err != nil {
@@ -1204,9 +1265,24 @@ func (s *Server) handleCIBAGrant(w http.ResponseWriter, r *http.Request, req *to
 
 // fireCIBAWebhook sends a notification to the configured webhook URL.
 func (s *Server) fireCIBAWebhook(webhookURL, authReqID, loginHint, bindingMsg string) {
-	body := fmt.Sprintf(`{"auth_req_id":"%s","login_hint":"%s","binding_message":"%s"}`,
-		authReqID, loginHint, bindingMsg)
-	resp, err := http.Post(webhookURL, "application/json", strings.NewReader(body))
+	body, err := json.Marshal(map[string]string{
+		"auth_req_id":     authReqID,
+		"login_hint":      loginHint,
+		"binding_message": bindingMsg,
+	})
+	if err != nil {
+		s.logger.Error("ciba webhook", "error", err, "url", webhookURL)
+		return
+	}
+	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(body))
+	if err != nil {
+		s.logger.Error("ciba webhook", "error", err, "url", webhookURL)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		s.logger.Error("ciba webhook", "error", err, "url", webhookURL)
 		return
@@ -1627,6 +1703,36 @@ func validateRedirectURI(raw string) error {
 	}
 	if u.Scheme == "http" && host != "localhost" && net.ParseIP(host) == nil {
 		return fmt.Errorf("http redirect_uri must be localhost or IP")
+	}
+	return nil
+}
+
+func validateWebhookURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("scheme must be https")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("host is required")
+	}
+	if u.User != nil {
+		return fmt.Errorf("userinfo is not allowed")
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return fmt.Errorf("host is required")
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return fmt.Errorf("localhost targets are not allowed")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+			ip.IsMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("private or local IP targets are not allowed")
+		}
 	}
 	return nil
 }

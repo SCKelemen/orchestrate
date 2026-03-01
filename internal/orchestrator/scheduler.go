@@ -133,6 +133,7 @@ func (sc *Scheduler) checkSchedules(ctx context.Context) {
 			title = "scheduled run"
 		}
 		_, err := sc.store.CreateTask(ctx, taskID, store.CreateTaskParams{
+			OwnerUserID: sched.OwnerUserID,
 			Title:       title + " (schedule/" + sched.ID + ")",
 			Description: sched.Description,
 			Prompt:      sched.Prompt,

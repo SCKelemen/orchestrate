@@ -17,6 +17,9 @@ func (Batch) Plan(_ context.Context, task *store.Task) ([]AgentPlan, error) {
 	if n < 1 {
 		n = 1
 	}
+	if n > maxPlannedAgents {
+		return nil, fmt.Errorf("agent_count %d exceeds max %d", n, maxPlannedAgents)
+	}
 	plans := make([]AgentPlan, n)
 	for i := range n {
 		plans[i] = AgentPlan{

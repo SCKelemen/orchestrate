@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/SCKelemen/orchestrate/internal/auth"
 	"github.com/SCKelemen/orchestrate/internal/store"
 )
 
@@ -69,6 +70,21 @@ func toTaskResponse(t *store.Task) taskResponse {
 	}
 }
 
+func authorizeTaskAccess(w http.ResponseWriter, id *auth.Identity, t *store.Task) bool {
+	if id == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	if isAdminIdentity(id) {
+		return true
+	}
+	if t.OwnerUserID != id.UserID {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return false
+	}
+	return true
+}
+
 // newID generates a time-sortable random ID (simplified ULID-style).
 func newID() string {
 	// 6 bytes timestamp (ms) + 10 bytes random = 32 hex chars
@@ -93,6 +109,12 @@ func newID() string {
 
 // AIP-131: CreateTask
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var req createTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -102,20 +124,35 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
+	if err := validatePromptSize(req.Prompt); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.RepoURL == "" {
 		writeError(w, http.StatusBadRequest, "repoUrl is required")
+		return
+	}
+	strategy, err := normalizeStrategy(req.Strategy)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	agentCount, err := normalizeAgentCount(req.AgentCount)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	id := newID()
 	task, err := s.store.CreateTask(r.Context(), id, store.CreateTaskParams{
+		OwnerUserID: idn.UserID,
 		Title:       req.Title,
 		Description: req.Description,
 		Prompt:      req.Prompt,
 		RepoURL:     req.RepoURL,
 		BaseRef:     req.BaseRef,
-		Strategy:    store.Strategy(req.Strategy),
-		AgentCount:  req.AgentCount,
+		Strategy:    strategy,
+		AgentCount:  agentCount,
 		Priority:    req.Priority,
 		Image:       req.Image,
 	})
@@ -129,6 +166,12 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 
 // AIP-132: ListTasks
 func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	q := r.URL.Query()
 	pageSize := 20
 	if ps := q.Get("pageSize"); ps != "" {
@@ -137,11 +180,16 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tasks, err := s.store.ListTasks(r.Context(), store.ListTasksParams{
+	params := store.ListTasksParams{
 		State:     store.TaskState(q.Get("state")),
 		PageSize:  pageSize,
 		PageToken: q.Get("pageToken"),
-	})
+	}
+	if !isAdminIdentity(idn) {
+		params.OwnerUserID = idn.UserID
+	}
+
+	tasks, err := s.store.ListTasks(r.Context(), params)
 	if err != nil {
 		s.logger.Error("list tasks", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
@@ -167,6 +215,12 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 
 // AIP-131: GetTask
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := r.PathValue("task")
 	task, err := s.store.GetTask(r.Context(), id)
 	if err != nil {
@@ -178,12 +232,35 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("task not found: %s", id))
 		return
 	}
+	if !authorizeTaskAccess(w, idn, task) {
+		return
+	}
 	writeJSON(w, http.StatusOK, toTaskResponse(task))
 }
 
 // AIP-134: UpdateTask
 func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := r.PathValue("task")
+	current, err := s.store.GetTask(r.Context(), id)
+	if err != nil {
+		s.logger.Error("get task", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get task")
+		return
+	}
+	if current == nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("task not found: %s", id))
+		return
+	}
+	if !authorizeTaskAccess(w, idn, current) {
+		return
+	}
+
 	var req updateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -206,7 +283,26 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 
 // AIP-135: DeleteTask
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := r.PathValue("task")
+	task, err := s.store.GetTask(r.Context(), id)
+	if err != nil {
+		s.logger.Error("get task", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get task")
+		return
+	}
+	if task == nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("task not found: %s", id))
+		return
+	}
+	if !authorizeTaskAccess(w, idn, task) {
+		return
+	}
 	if err := s.store.DeleteTask(r.Context(), id); err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("task not found: %s", id))
 		return
@@ -216,10 +312,19 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 
 // AIP-136: CancelTask
 func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := r.PathValue("task")
 	task, err := s.store.GetTask(r.Context(), id)
 	if err != nil || task == nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("task not found: %s", id))
+		return
+	}
+	if !authorizeTaskAccess(w, idn, task) {
 		return
 	}
 	if task.State != store.TaskQueued && task.State != store.TaskRunning {
@@ -237,10 +342,19 @@ func (s *Server) cancelTask(w http.ResponseWriter, r *http.Request) {
 
 // AIP-136: RetryTask
 func (s *Server) retryTask(w http.ResponseWriter, r *http.Request) {
+	idn := auth.FromContext(r.Context())
+	if idn == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	id := r.PathValue("task")
 	task, err := s.store.GetTask(r.Context(), id)
 	if err != nil || task == nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("task not found: %s", id))
+		return
+	}
+	if !authorizeTaskAccess(w, idn, task) {
 		return
 	}
 	if task.State != store.TaskFailed && task.State != store.TaskCancelled {

@@ -10,15 +10,18 @@ import (
 	"github.com/SCKelemen/orchestrate/internal/store"
 )
 
+const maxRequestBodyBytes = 1 << 20 // 1 MiB
+
 // Server is the HTTP API server for orchestrate.
 type Server struct {
-	store            *store.Store
-	auth             *auth.Middleware
-	signer           *auth.Signer
-	webauthn         *auth.WebAuthnProvider
-	webauthnSessions *auth.WebAuthnSessionStore
-	mux              *http.ServeMux
-	logger           *slog.Logger
+	store             *store.Store
+	auth              *auth.Middleware
+	signer            *auth.Signer
+	allowInsecureAuth bool
+	webauthn          *auth.WebAuthnProvider
+	webauthnSessions  *auth.WebAuthnSessionStore
+	mux               *http.ServeMux
+	logger            *slog.Logger
 }
 
 // ServerOption configures the server.
@@ -29,6 +32,14 @@ func WithWebAuthn(wp *auth.WebAuthnProvider) ServerOption {
 	return func(s *Server) {
 		s.webauthn = wp
 		s.webauthnSessions = auth.NewWebAuthnSessionStore()
+	}
+}
+
+// WithInsecureEmailAuth enables unauthenticated email-based login flows.
+// This should remain disabled in public deployments.
+func WithInsecureEmailAuth(enabled bool) ServerOption {
+	return func(s *Server) {
+		s.allowInsecureAuth = enabled
 	}
 }
 
@@ -113,6 +124,9 @@ func (s *Server) runCustomMethod(w http.ResponseWriter, r *http.Request) {
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	}
 	s.mux.ServeHTTP(w, r)
 }
 
