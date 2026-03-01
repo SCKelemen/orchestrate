@@ -1,214 +1,222 @@
-# orchestrate
+# Orchestrate
 
-Parallel Claude Code agent orchestration with Docker-based isolation, a SQLite task queue, and an HTTP API.
+`orchestrate` is a Go service + CLI for running coding agents against Git repositories in isolated Docker sandboxes.
 
-## Overview
+It is designed for a single-tenant operator model (one team/org running its own instance), with API-first task execution and scheduling.
 
-orchestrate runs multiple [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI agents in parallel, each in an isolated Docker container with its own git worktree. It provides:
+## What It Is
 
-- **Task queue** with priority scheduling and state management
-- **Multiple execution strategies** for different use cases
-- **Cron and interval scheduling** for recurring tasks
-- **HTTP API** following [AIP](https://aip.dev) resource-oriented design
-- **OAuth 2.0 authentication** with multiple grant types
+Orchestrate gives you:
 
-## Architecture
+- An HTTP API server for task and schedule management
+- A CLI for day-to-day operations (`submit`, `list`, `status`, `logs`, `schedule`, `auth`)
+- A scheduler that dequeues queued work and triggers scheduled work
+- Strategy-based orchestration (`IMPLEMENT`, `INVESTIGATE`, `COMPETE`, `BATCH`)
+- Backend selection per task/schedule (`claude` and `codex`)
+- Persistent state in SQLite (tasks, runs, schedules, users, sessions, auth artifacts)
 
-```
-                                +-----------+
-                                |  CLI /    |
-                                |  Client   |
-                                +-----+-----+
-                                      |
-                                      v
-+--------+   HTTP   +----------+   Dequeue   +-------------+
-| Sched- | ------> |  API     | ---------> | Orchestrator |
-| uler   |         |  Server  |            +------+------+
-+--------+         +----------+                   |
-                                            Plan (Strategy)
-                                                  |
-                                     +------------+------------+
-                                     |            |            |
-                                     v            v            v
-                                 +-------+    +-------+    +-------+
-                                 |Docker |    |Docker |    |Docker |
-                                 |  #0   |    |  #1   |    |  #2   |
-                                 |claude |    |claude |    |claude |
-                                 +-------+    +-------+    +-------+
-```
+## What It Can Do
 
-## Quick Start
+- Run one-off coding tasks against a repo + base branch
+- Fan out work across multiple agents in parallel (`COMPETE` / `BATCH`)
+- Run recurring jobs using cron or ISO-8601 intervals
+- Keep per-run execution logs and run state history
+- Authenticate via static bearer token (bootstrap/admin)
+- Authenticate via JWT access/refresh tokens
+- Authenticate via GitHub / Google token exchange
+- Optionally enable WebAuthn
+- Optionally enable device + browser auth-code flows (explicitly disabled by default)
+- Route work to common agent backends: `claude` (`anthropic` alias) and `codex` (`openai` alias)
 
-### Prerequisites
+## How To Use It
 
-- Go 1.24+
+### 1. Prerequisites
+
+- Go `1.24+`
 - Docker
-- An `ANTHROPIC_API_KEY` for Claude Code
+- Access to at least one agent CLI in your container image (`claude` and/or `codex`)
 
-### Build
+### 2. Build the CLI
 
 ```bash
 go build -o orchestrate ./cmd/orchestrate
 ```
 
-### Build the Agent Image
+### 3. Build an agent image
+
+Default image build:
 
 ```bash
 docker build -t orchestrate-agent:latest -f docker/Dockerfile.agent .
 ```
 
-### Run the Server
+Notes:
+
+- The default `Dockerfile.agent` installs Claude Code CLI.
+- If you want `--agent codex`, use an image that includes `codex` as well, then pass it with `--image`.
+
+### 4. Start the server
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export ORCHESTRATE_TOKEN=my-secret-token
-
 ./orchestrate server --addr :8080
 ```
 
-### Submit a Task
+On first start, Orchestrate creates a data directory and bootstrap token:
+
+- Data dir default: `~/.local/share/orchestrate`
+- Token file: `~/.local/share/orchestrate/token`
+- JWT key: `~/.local/share/orchestrate/jwt.key`
+
+### 5. Authenticate from another terminal
+
+```bash
+export ORCHESTRATE_TOKEN="$(cat ~/.local/share/orchestrate/token)"
+./orchestrate auth login --method token --with-token "$ORCHESTRATE_TOKEN"
+```
+
+### 6. Submit work
 
 ```bash
 ./orchestrate submit \
-  --prompt "Add input validation to the /api/users endpoint" \
-  --repo https://github.com/org/repo \
-  --strategy IMPLEMENT
+  --title "Fix flaky test" \
+  --agent claude \
+  --prompt "Find and fix flaky tests, then explain the root cause." \
+  --repo https://github.com/your-org/your-repo.git \
+  --base-ref main \
+  --strategy IMPLEMENT \
+  --agents 1
 ```
 
-### Check Status
+### 7. Inspect progress
 
 ```bash
 ./orchestrate list
-./orchestrate status <task-id>
-./orchestrate logs <task-id> <run-id>
+./orchestrate status <task_id>
 ```
 
-## CLI Reference
+If a task name is `tasks/abc123`, the task id is `abc123`.
 
-| Command | Description |
-|---|---|
-| `orchestrate server` | Start the HTTP API server |
-| `orchestrate submit` | Submit a new task |
-| `orchestrate list` | List tasks |
-| `orchestrate status` | Get task status and runs |
-| `orchestrate cancel` | Cancel a running or queued task |
-| `orchestrate logs` | Stream run logs |
-| `orchestrate schedule` | Manage recurring schedules |
-| `orchestrate auth` | Authentication management |
-
-## API Reference
-
-The HTTP API follows [AIP](https://aip.dev) resource-oriented design conventions.
-
-### Tasks
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/v1/tasks` | Create a task |
-| `GET` | `/v1/tasks` | List tasks |
-| `GET` | `/v1/tasks/{id}` | Get a task |
-| `PATCH` | `/v1/tasks/{id}` | Update a task |
-| `DELETE` | `/v1/tasks/{id}` | Delete a task |
-| `POST` | `/v1/tasks/{id}/:cancel` | Cancel a task |
-| `POST` | `/v1/tasks/{id}/:retry` | Retry a failed task |
-
-### Runs
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/v1/tasks/{id}/runs` | List runs for a task |
-| `GET` | `/v1/tasks/{id}/runs/{rid}` | Get a run |
-| `GET` | `/v1/tasks/{id}/runs/{rid}/:logs` | Stream run logs (SSE) |
-
-### Schedules
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/v1/schedules` | Create a schedule |
-| `GET` | `/v1/schedules` | List schedules |
-| `GET` | `/v1/schedules/{id}` | Get a schedule |
-| `PATCH` | `/v1/schedules/{id}` | Update a schedule |
-| `DELETE` | `/v1/schedules/{id}` | Delete a schedule |
-| `POST` | `/v1/schedules/{id}/:pause` | Pause a schedule |
-| `POST` | `/v1/schedules/{id}/:resume` | Resume a schedule |
-
-### Users
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/v1/users` | Create a user |
-| `GET` | `/v1/users` | List users |
-| `GET` | `/v1/users/{id}` | Get a user |
-| `PATCH` | `/v1/users/{id}` | Update a user |
-| `DELETE` | `/v1/users/{id}` | Delete a user |
-
-### Auth
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/v1/auth/token` | Token endpoint (multiple grant types) |
-| `POST` | `/v1/auth/token/:revoke` | Revoke a refresh token |
-| `GET` | `/v1/auth/userinfo` | Get current user info |
-| `GET` | `/v1/auth/authorize` | Authorization code login page |
-| `POST` | `/v1/auth/authorize` | Authorization code form submit |
-| `POST` | `/v1/auth/device` | Initiate device flow |
-| `GET` | `/v1/auth/device/verify` | Device verification page |
-| `POST` | `/v1/auth/ciba` | Initiate CIBA flow |
-
-## Execution Strategies
-
-| Strategy | Agents | Success Criteria | Use Case |
-|---|---|---|---|
-| **IMPLEMENT** | 1 | Agent exits 0 | Standard single-agent task |
-| **INVESTIGATE** | 1 (read-only) | Agent exits 0, output is summary | Analysis without code changes |
-| **COMPETE** | N (default 2) | Any agent exits 0 | Race multiple approaches |
-| **BATCH** | N (default 1) | All agents exit 0 | Fan-out parallel work |
-
-## Authentication
-
-The API supports multiple OAuth 2.0 grant types:
-
-- **Bearer token** &mdash; static token via `ORCHESTRATE_TOKEN` env var, exchangeable for JWT
-- **Authorization code + PKCE** &mdash; browser-based login flow ([RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636))
-- **Device flow** &mdash; CLI-friendly login ([RFC 8628](https://datatracker.ietf.org/doc/html/rfc8628))
-- **CIBA** &mdash; backchannel authentication ([OpenID CIBA](https://openid.net/specs/openid-client-initiated-backchannel-authentication-core-1_0.html))
-- **Token exchange** &mdash; GitHub/Google IdP tokens ([RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693))
-- **WebAuthn** &mdash; passkey registration and login
-
-All API endpoints (except auth and health) require a `Bearer` token in the `Authorization` header.
-
-## Configuration
-
-| Variable | Description | Default |
-|---|---|---|
-| `ORCHESTRATE_DATA_DIR` | Data directory for SQLite DB | `~/.local/share/orchestrate` |
-| `ANTHROPIC_API_KEY` | Claude API key (passed to agent containers) | &mdash; |
-| `ORCHESTRATE_TOKEN` | Static bearer token for API auth | &mdash; |
-
-## Docker Agent Image
-
-The agent image (`docker/Dockerfile.agent`) provides the execution environment for Claude Code:
-
-- Ubuntu 24.04 base
-- Git, curl, jq
-- Node.js 22 (required by Claude Code CLI)
-- Claude Code CLI (`@anthropic-ai/claude-code`)
-- Non-root `agent` user
-
-Build it:
+For logs, first get run IDs from the API:
 
 ```bash
-docker build -t orchestrate-agent:latest -f docker/Dockerfile.agent .
+curl -s -H "Authorization: Bearer $ORCHESTRATE_TOKEN" \
+  http://localhost:8080/v1/tasks/<task_id>/runs
 ```
 
-## Development
+Then stream logs:
 
 ```bash
-go build ./...
+./orchestrate logs --task <task_id> --run <run_id>
+```
+
+### 8. Create recurring jobs
+
+Cron example:
+
+```bash
+./orchestrate schedule create \
+  --title "Hourly dependency check" \
+  --agent claude \
+  --schedule "0 * * * *" \
+  --prompt "Check for vulnerable dependencies and propose updates." \
+  --repo https://github.com/your-org/your-repo.git
+```
+
+Interval example:
+
+```bash
+./orchestrate schedule create \
+  --schedule "R/PT1H" \
+  --prompt "Run hourly code health checks." \
+  --repo https://github.com/your-org/your-repo.git
+```
+
+Manage schedules:
+
+```bash
+./orchestrate schedule list
+./orchestrate schedule pause <schedule_id>
+./orchestrate schedule resume <schedule_id>
+./orchestrate schedule delete <schedule_id>
+```
+
+### Useful Environment Variables
+
+- `ORCHESTRATE_ADDR` - server bind address
+- `ORCHESTRATE_MAX_CONCURRENT` - scheduler concurrency cap
+- `ORCHESTRATE_DATA_DIR` - base data directory
+- `ORCHESTRATE_SERVER` - CLI server URL
+- `ORCHESTRATE_TOKEN` - static admin token or CLI override
+- `ORCHESTRATE_AGENT` - default backend (`claude` or `codex`)
+- `ORCHESTRATE_ENABLE_EMAIL_AUTH` - enables insecure email-based auth flows (off by default)
+- `ORCHESTRATE_WEBAUTHN_RPID`, `ORCHESTRATE_WEBAUTHN_RPNAME`, `ORCHESTRATE_WEBAUTHN_ORIGINS` - WebAuthn config
+- `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` - passed to Claude runs
+- `OPENAI_API_KEY`, `OPENAI_BASE_URL` - passed to Codex runs
+
+## How It Works
+
+Core flow:
+
+1. Client creates a task (or a schedule that later creates tasks).
+2. Task is persisted in SQLite with `QUEUED` state.
+3. Scheduler polls for queued tasks and due schedules.
+4. Orchestrator picks a strategy and generates one or more `AgentPlan`s.
+5. For each plan, orchestrator creates a run record.
+6. Orchestrator creates a hardened Docker sandbox.
+7. Orchestrator selects backend (`claude` or `codex`) per task.
+8. Backend-specific API credentials are injected.
+9. The agent CLI executes with the planned prompt.
+10. Run state and output are persisted.
+11. Strategy evaluates results and marks task `SUCCEEDED` or `FAILED`.
+
+Main components:
+
+- API server: `internal/api`
+- Auth + token logic: `internal/auth`
+- Scheduler + orchestration: `internal/orchestrator`
+- Agent adapters: `internal/agent`
+- Sandbox runtime: `internal/sandbox`
+- Persistence: `internal/store`
+
+## Sandbox Security
+
+The Docker sandbox is hardened by default:
+
+- Runs as non-root user `1000:1000`
+- Drops all Linux capabilities (`--cap-drop ALL`)
+- Enables `no-new-privileges`
+- Uses read-only root filesystem (`--read-only`)
+- Limits process count (`--pids-limit 512`)
+- Writable paths are restricted to tmpfs mounts (`/tmp` and `/home/agent/workspace`)
+- Only backend-relevant secrets are injected into a run (`ANTHROPIC_*` for Claude, `OPENAI_*` for Codex)
+
+Additional auth/security controls:
+
+- One-time consumption for auth code, device code, and CIBA grants
+- Request body size limits and HTTP timeouts
+- CIBA webhook URL validation + runtime DNS/IP checks against local/private targets
+- Insecure email/browser/device auth flows are disabled unless explicitly enabled
+
+Important deployment notes for public-facing use:
+
+- Agent execution is still arbitrary code execution by design.
+- Run this service on dedicated infrastructure.
+- Restrict outbound network egress at the host/VPC layer.
+- Keep API keys scoped and minimal.
+- Put the API behind HTTPS + a reverse proxy with rate limiting.
+
+## Testing and CI/CD
+
+Local checks:
+
+```bash
 go test ./...
+go test -race ./...
 go vet ./...
+go test ./... -cover
 ```
 
-## License
+GitHub Actions:
 
-See [LICENSE](LICENSE) for details.
+- CI: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+- CD: [`.github/workflows/cd.yml`](.github/workflows/cd.yml) (publishes `orchestrate-agent` image to GHCR)
