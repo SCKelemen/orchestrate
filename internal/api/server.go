@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SCKelemen/orchestrate/internal/auth"
@@ -18,6 +19,8 @@ type Server struct {
 	auth              *auth.Middleware
 	signer            *auth.Signer
 	allowInsecureAuth bool
+	allowAnyImage     bool
+	allowedImages     map[string]struct{}
 	webauthn          *auth.WebAuthnProvider
 	webauthnSessions  *auth.WebAuthnSessionStore
 	mux               *http.ServeMux
@@ -43,17 +46,36 @@ func WithInsecureEmailAuth(enabled bool) ServerOption {
 	}
 }
 
+// WithImagePolicy configures image allowlist enforcement for task and schedule submissions.
+func WithImagePolicy(allowed []string, allowAny bool) ServerOption {
+	return func(s *Server) {
+		s.allowAnyImage = allowAny
+		s.allowedImages = make(map[string]struct{}, len(allowed))
+		for _, image := range allowed {
+			image = strings.TrimSpace(image)
+			if image == "" {
+				continue
+			}
+			s.allowedImages[image] = struct{}{}
+		}
+	}
+}
+
 // NewServer creates a new API server.
 func NewServer(s *store.Store, mw *auth.Middleware, signer *auth.Signer, logger *slog.Logger, opts ...ServerOption) *Server {
 	srv := &Server{
-		store:  s,
-		auth:   mw,
-		signer: signer,
-		mux:    http.NewServeMux(),
-		logger: logger,
+		store:         s,
+		auth:          mw,
+		signer:        signer,
+		allowedImages: map[string]struct{}{defaultAgentImage: {}},
+		mux:           http.NewServeMux(),
+		logger:        logger,
 	}
 	for _, opt := range opts {
 		opt(srv)
+	}
+	if !srv.allowAnyImage && len(srv.allowedImages) == 0 {
+		srv.allowedImages[defaultAgentImage] = struct{}{}
 	}
 	srv.routes()
 	srv.registerAuthRoutes()

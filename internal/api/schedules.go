@@ -133,6 +133,11 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	image, err := normalizeImage(req.Image, s.allowedImages, s.allowAnyImage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Validate and parse schedule expression
 	spec, err := schedule.Parse(req.ScheduleExpr)
@@ -157,7 +162,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		BaseRef:      req.BaseRef,
 		Strategy:     strategy,
 		AgentCount:   agentCount,
-		Image:        req.Image,
+		Image:        image,
 		NextRunTime:  next.UTC().Format("2006-01-02T15:04:05Z"),
 		MaxRuns:      req.MaxRuns,
 	})

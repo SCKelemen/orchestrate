@@ -45,6 +45,18 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Vulnerability scan
+        run: $(go env GOPATH)/bin/govulncheck ./...
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Security static analysis
+        run: $(go env GOPATH)/bin/gosec ./...
+
       - name: Build
         run: go build ./cmd/orchestrate
 

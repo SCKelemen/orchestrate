@@ -200,6 +200,81 @@ func TestCreateTaskAcceptsOpenAIAliasAsCodex(t *testing.T) {
 	}
 }
 
+func TestCreateTaskRejectsDisallowedImage(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _, adminToken := newSecuredTestServer(t)
+	body := `{"prompt":"do work","repoUrl":"https://example.com/repo.git","image":"ghcr.io/acme/custom-agent:latest"}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "image is not allowed") {
+		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}
+
+func TestCreateTaskAllowsConfiguredImage(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _, adminToken := newSecuredTestServerWithOptions(
+		t,
+		WithImagePolicy([]string{"ghcr.io/acme/custom-agent:latest"}, false),
+	)
+	body := `{"prompt":"do work","repoUrl":"https://example.com/repo.git","image":"ghcr.io/acme/custom-agent:latest"}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Image string `json:"image"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Image != "ghcr.io/acme/custom-agent:latest" {
+		t.Fatalf("image=%q want=ghcr.io/acme/custom-agent:latest", out.Image)
+	}
+}
+
+func TestCreateScheduleRejectsDisallowedImage(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _, adminToken := newSecuredTestServer(t)
+	body := `{
+		"scheduleExpr":"0 * * * *",
+		"prompt":"do scheduled work",
+		"repoUrl":"https://example.com/repo.git",
+		"image":"ghcr.io/acme/custom-agent:latest"
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/schedules", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "image is not allowed") {
+		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}
+
 func TestCreateTaskDefaultsAgentToClaude(t *testing.T) {
 	t.Parallel()
 

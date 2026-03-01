@@ -13,6 +13,15 @@ import (
 const (
 	defaultContainerUser = "1000:1000"
 	defaultPIDsLimit     = "512"
+	defaultAgentImage    = "orchestrate-agent:latest"
+)
+
+// NetworkMode controls the container network configuration.
+type NetworkMode string
+
+const (
+	NetworkModeDefault NetworkMode = "default"
+	NetworkModeNone    NetworkMode = "none"
 )
 
 var defaultSandboxEnv = map[string]string{
@@ -24,15 +33,72 @@ var defaultSandboxEnv = map[string]string{
 
 // Docker implements Sandbox using Docker containers via os/exec.
 type Docker struct {
-	dataDir string
+	dataDir       string
+	allowAnyImage bool
+	allowedImages map[string]struct{}
+	networkMode   NetworkMode
+}
+
+// DockerOption configures Docker sandbox behavior.
+type DockerOption func(*Docker)
+
+// WithAllowAnyImage disables image allowlist enforcement.
+func WithAllowAnyImage(allow bool) DockerOption {
+	return func(d *Docker) {
+		d.allowAnyImage = allow
+	}
+}
+
+// WithAllowedImages configures the explicit image allowlist.
+func WithAllowedImages(images []string) DockerOption {
+	return func(d *Docker) {
+		d.allowedImages = make(map[string]struct{}, len(images))
+		for _, image := range images {
+			image = strings.TrimSpace(image)
+			if image == "" {
+				continue
+			}
+			d.allowedImages[image] = struct{}{}
+		}
+	}
+}
+
+// WithNetworkMode configures the Docker network mode.
+func WithNetworkMode(mode NetworkMode) DockerOption {
+	return func(d *Docker) {
+		d.networkMode = mode
+	}
 }
 
 // NewDocker creates a Docker sandbox manager.
-func NewDocker(dataDir string) *Docker {
-	return &Docker{dataDir: dataDir}
+func NewDocker(dataDir string, opts ...DockerOption) *Docker {
+	d := &Docker{
+		dataDir:       dataDir,
+		allowedImages: map[string]struct{}{defaultAgentImage: {}},
+		networkMode:   NetworkModeDefault,
+	}
+	for _, opt := range opts {
+		opt(d)
+	}
+	if !d.allowAnyImage && len(d.allowedImages) == 0 {
+		d.allowedImages[defaultAgentImage] = struct{}{}
+	}
+	if d.networkMode == "" {
+		d.networkMode = NetworkModeDefault
+	}
+	return d
 }
 
 func (d *Docker) Create(ctx context.Context, opts CreateOpts) (*Workspace, error) {
+	image := strings.TrimSpace(opts.Image)
+	if image == "" {
+		image = defaultAgentImage
+	}
+	opts.Image = image
+	if !d.imageAllowed(image) {
+		return nil, fmt.Errorf("sandbox image %q is not allowed", image)
+	}
+
 	ws := &Workspace{
 		ID:      fmt.Sprintf("orch-%d", uniqueCounter()),
 		Branch:  opts.Branch,
@@ -90,6 +156,9 @@ func (d *Docker) createArgs(opts CreateOpts, workspaceID string) []string {
 		"--tmpfs", "/home/agent/workspace:rw,nosuid,nodev,uid=1000,gid=1000",
 		"-w", "/home/agent/workspace",
 	}
+	if d.networkMode == NetworkModeNone {
+		args = append(args, "--network", "none")
+	}
 
 	env := make(map[string]string, len(defaultSandboxEnv)+len(opts.EnvVars))
 	for k, v := range defaultSandboxEnv {
@@ -110,6 +179,14 @@ func (d *Docker) createArgs(opts CreateOpts, workspaceID string) []string {
 
 	args = append(args, opts.Image, "sleep", "infinity")
 	return args
+}
+
+func (d *Docker) imageAllowed(image string) bool {
+	if d.allowAnyImage {
+		return true
+	}
+	_, ok := d.allowedImages[image]
+	return ok
 }
 
 func (d *Docker) Exec(ctx context.Context, ws *Workspace, cmd []string) (*ExecResult, error) {

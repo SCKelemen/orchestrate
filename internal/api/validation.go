@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/SCKelemen/orchestrate/internal/agent"
 	"github.com/SCKelemen/orchestrate/internal/store"
@@ -9,8 +10,9 @@ import (
 
 const (
 	// Keep agent fan-out bounded to avoid untrusted requests causing memory/goroutine exhaustion.
-	maxAgentCount = 32
-	maxPromptSize = 64 * 1024
+	maxAgentCount     = 32
+	maxPromptSize     = 64 * 1024
+	defaultAgentImage = "orchestrate-agent:latest"
 )
 
 func normalizeStrategy(raw string) (store.Strategy, error) {
@@ -51,4 +53,18 @@ func validatePromptSize(prompt string) error {
 
 func normalizeAgentBackend(raw string) (string, error) {
 	return agent.NormalizeBackend(raw)
+}
+
+func normalizeImage(raw string, allowed map[string]struct{}, allowAny bool) (string, error) {
+	image := strings.TrimSpace(raw)
+	if image == "" {
+		image = defaultAgentImage
+	}
+	if allowAny {
+		return image, nil
+	}
+	if _, ok := allowed[image]; !ok {
+		return "", fmt.Errorf("image is not allowed: %s", image)
+	}
+	return image, nil
 }

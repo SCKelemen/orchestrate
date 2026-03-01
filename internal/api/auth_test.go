@@ -37,6 +37,10 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 }
 
 func newSecuredTestServer(t *testing.T) (*Server, *store.Store, *auth.Signer, string) {
+	return newSecuredTestServerWithOptions(t)
+}
+
+func newSecuredTestServerWithOptions(t *testing.T, opts ...ServerOption) (*Server, *store.Store, *auth.Signer, string) {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "api-secure.db")
@@ -54,7 +58,8 @@ func newSecuredTestServer(t *testing.T) (*Server, *store.Store, *auth.Signer, st
 		auth.NewBearerProvider(adminToken),
 	)
 
-	srv := NewServer(st, mw, signer, logger)
+	srvOpts := append([]ServerOption{}, opts...)
+	srv := NewServer(st, mw, signer, logger, srvOpts...)
 	return srv, st, signer, adminToken
 }
 

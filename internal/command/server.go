@@ -19,6 +19,8 @@ import (
 	"github.com/SCKelemen/orchestrate/internal/sandbox"
 )
 
+const defaultAgentImage = "orchestrate-agent:latest"
+
 func newServerCmd() *clix.Command {
 	cmd := clix.NewCommand("server")
 	cmd.Short = "Start the orchestrate API server"
@@ -90,7 +92,29 @@ func newServerCmd() *clix.Command {
 		}
 		mw := auth.NewMiddleware(providers...)
 
-		sb := sandbox.NewDocker(dir)
+		allowAnyImage := parseBoolEnv("ORCHESTRATE_ALLOW_ANY_IMAGE")
+		allowedImages := parseCSVEnv("ORCHESTRATE_ALLOWED_IMAGES")
+		if !allowAnyImage && len(allowedImages) == 0 {
+			allowedImages = []string{defaultAgentImage}
+		}
+		networkMode, err := parseSandboxNetworkMode(os.Getenv("ORCHESTRATE_SANDBOX_NETWORK"))
+		if err != nil {
+			return err
+		}
+
+		sb := sandbox.NewDocker(
+			dir,
+			sandbox.WithAllowAnyImage(allowAnyImage),
+			sandbox.WithAllowedImages(allowedImages),
+			sandbox.WithNetworkMode(networkMode),
+		)
+		logger.Info(
+			"sandbox policy configured",
+			"allowAnyImage", allowAnyImage,
+			"allowedImages", allowedImages,
+			"networkMode", string(networkMode),
+		)
+
 		agentBackend := os.Getenv("ORCHESTRATE_AGENT")
 		defaultAgent, err := agent.NormalizeBackend(agentBackend)
 		if err != nil {
@@ -114,6 +138,7 @@ func newServerCmd() *clix.Command {
 		enableInsecureAuth := strings.EqualFold(os.Getenv("ORCHESTRATE_ENABLE_EMAIL_AUTH"), "1") ||
 			strings.EqualFold(os.Getenv("ORCHESTRATE_ENABLE_EMAIL_AUTH"), "true")
 		serverOpts = append(serverOpts, api.WithInsecureEmailAuth(enableInsecureAuth))
+		serverOpts = append(serverOpts, api.WithImagePolicy(allowedImages, allowAnyImage))
 		if enableInsecureAuth {
 			logger.Warn("insecure email-based auth flows are enabled")
 		}
@@ -178,4 +203,42 @@ func loadOrGenerateSecret(dir string) ([]byte, error) {
 		return nil, fmt.Errorf("write secret: %w", err)
 	}
 	return secret, nil
+}
+
+func parseCSVEnv(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func parseBoolEnv(key string) bool {
+	return strings.EqualFold(os.Getenv(key), "1") ||
+		strings.EqualFold(os.Getenv(key), "true")
+}
+
+func parseSandboxNetworkMode(raw string) (sandbox.NetworkMode, error) {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	if v == "" || v == string(sandbox.NetworkModeDefault) {
+		return sandbox.NetworkModeDefault, nil
+	}
+	if v == string(sandbox.NetworkModeNone) {
+		return sandbox.NetworkModeNone, nil
+	}
+	return "", fmt.Errorf("invalid ORCHESTRATE_SANDBOX_NETWORK: %q (supported: default, none)", raw)
 }

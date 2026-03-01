@@ -25,6 +25,12 @@ func TestNewDocker(t *testing.T) {
 	if d.dataDir != "/tmp/orchestrate" {
 		t.Fatalf("dataDir=%q want=%q", d.dataDir, "/tmp/orchestrate")
 	}
+	if !d.imageAllowed("orchestrate-agent:latest") {
+		t.Fatal("default image should be allowed")
+	}
+	if d.imageAllowed("custom/image:latest") {
+		t.Fatal("custom image should not be allowed by default")
+	}
 }
 
 func TestCreateArgsIncludesHardeningDefaults(t *testing.T) {
@@ -95,6 +101,40 @@ func TestCreateArgsAllowsEnvOverride(t *testing.T) {
 	env := parseEnvArgs(args)
 	if env["HOME"] != "/home/agent/workspace" {
 		t.Fatalf("HOME=%q want=/home/agent/workspace", env["HOME"])
+	}
+}
+
+func TestCreateArgsWithNetworkNone(t *testing.T) {
+	t.Parallel()
+
+	d := NewDocker("/tmp/orchestrate", WithNetworkMode(NetworkModeNone))
+	args := d.createArgs(CreateOpts{
+		Image: "orchestrate-agent:latest",
+	}, "orch-3")
+
+	if !containsArgPair(args, "--network", "none") {
+		t.Fatalf("expected --network none in %#v", args)
+	}
+}
+
+func TestWithAllowAnyImage(t *testing.T) {
+	t.Parallel()
+
+	d := NewDocker("/tmp/orchestrate", WithAllowAnyImage(true))
+	if !d.imageAllowed("custom/image:latest") {
+		t.Fatal("custom image should be allowed when allowAnyImage is enabled")
+	}
+}
+
+func TestWithAllowedImages(t *testing.T) {
+	t.Parallel()
+
+	d := NewDocker("/tmp/orchestrate", WithAllowedImages([]string{"ghcr.io/acme/orchestrate-agent:v1"}))
+	if d.imageAllowed("orchestrate-agent:latest") {
+		t.Fatal("default image should not be allowed after explicit allowlist override")
+	}
+	if !d.imageAllowed("ghcr.io/acme/orchestrate-agent:v1") {
+		t.Fatal("configured image should be allowed")
 	}
 }
 

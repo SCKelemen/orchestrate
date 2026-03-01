@@ -150,6 +150,9 @@ Manage schedules:
 - `ORCHESTRATE_SERVER` - CLI server URL
 - `ORCHESTRATE_TOKEN` - static admin token or CLI override
 - `ORCHESTRATE_AGENT` - default backend (`claude` or `codex`)
+- `ORCHESTRATE_ALLOWED_IMAGES` - comma-separated container image allowlist (default: `orchestrate-agent:latest`)
+- `ORCHESTRATE_ALLOW_ANY_IMAGE` - bypass image allowlist (`true`/`1`), useful for local development only
+- `ORCHESTRATE_SANDBOX_NETWORK` - sandbox network mode (`default` or `none`)
 - `ORCHESTRATE_ENABLE_EMAIL_AUTH` - enables insecure email-based auth flows (off by default)
 - `ORCHESTRATE_WEBAUTHN_RPID`, `ORCHESTRATE_WEBAUTHN_RPNAME`, `ORCHESTRATE_WEBAUTHN_ORIGINS` - WebAuthn config
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` - passed to Claude runs
@@ -191,6 +194,8 @@ The Docker sandbox is hardened by default:
 - Limits process count (`--pids-limit 512`)
 - Writable paths are restricted to tmpfs mounts (`/tmp` and `/home/agent/workspace`)
 - Only backend-relevant secrets are injected into a run (`ANTHROPIC_*` for Claude, `OPENAI_*` for Codex)
+- Enforces image allowlist at API submit time and sandbox runtime
+- Supports explicit network isolation mode (`ORCHESTRATE_SANDBOX_NETWORK=none`)
 
 Additional auth/security controls:
 
@@ -198,6 +203,8 @@ Additional auth/security controls:
 - Request body size limits and HTTP timeouts
 - CIBA webhook URL validation + runtime DNS/IP checks against local/private targets
 - Insecure email/browser/device auth flows are disabled unless explicitly enabled
+
+Detailed roadmap: [`docs/sandbox-security-model.md`](docs/sandbox-security-model.md)
 
 Important deployment notes for public-facing use:
 
@@ -215,6 +222,8 @@ Local checks:
 go test ./...
 go test -race ./...
 go vet ./...
+govulncheck ./...
+gosec ./...
 go test ./... -cover
 ```
 

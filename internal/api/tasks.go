@@ -150,6 +150,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	image, err := normalizeImage(req.Image, s.allowedImages, s.allowAnyImage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	id := newID()
 	task, err := s.store.CreateTask(r.Context(), id, store.CreateTaskParams{
@@ -163,7 +168,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		Strategy:    strategy,
 		AgentCount:  agentCount,
 		Priority:    req.Priority,
-		Image:       req.Image,
+		Image:       image,
 	})
 	if err != nil {
 		s.logger.Error("create task", "error", err)
