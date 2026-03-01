@@ -36,9 +36,14 @@ var defaultSandboxEnv = map[string]string{
 	"XDG_CACHE_HOME":  "/tmp/.cache",
 }
 
+// execFn abstracts command execution for testing.
+// Returns stdout, stderr, process exit code, and a system-level error.
+type execFn func(ctx context.Context, name string, args ...string) (stdout, stderr string, exitCode int, err error)
+
 // Docker implements Sandbox using Docker containers via os/exec.
 type Docker struct {
 	dataDir       string
+	exec          execFn
 	allowAnyImage bool
 	allowedImages map[string]struct{}
 	networkMode   NetworkMode
@@ -79,6 +84,7 @@ func WithNetworkMode(mode NetworkMode) DockerOption {
 func NewDocker(dataDir string, opts ...DockerOption) *Docker {
 	d := &Docker{
 		dataDir:       dataDir,
+		exec:          defaultExec,
 		allowedImages: map[string]struct{}{defaultAgentImage: {}},
 		networkMode:   NetworkModeDefault,
 	}
@@ -92,6 +98,21 @@ func NewDocker(dataDir string, opts ...DockerOption) *Docker {
 		d.networkMode = NetworkModeDefault
 	}
 	return d
+}
+
+func defaultExec(ctx context.Context, name string, args ...string) (string, string, int, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return stdout.String(), stderr.String(), exitErr.ExitCode(), nil
+	}
+	if err != nil {
+		return stdout.String(), stderr.String(), -1, err
+	}
+	return stdout.String(), stderr.String(), 0, nil
 }
 
 func (d *Docker) Create(ctx context.Context, opts CreateOpts) (*Workspace, error) {
@@ -137,17 +158,14 @@ func (d *Docker) Create(ctx context.Context, opts CreateOpts) (*Workspace, error
 
 	args := d.createArgs(opts, ws.ID)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("docker create: %w: %s", err, out.String())
+	stdout, stderr, _, err := d.exec(ctx, "docker", args...)
+	if err != nil {
+		return nil, fmt.Errorf("docker create: %w: %s%s", err, stdout, stderr)
 	}
-	ws.ContainerID = strings.TrimSpace(out.String())
+	ws.ContainerID = strings.TrimSpace(stdout)
 
 	// Start the container
-	if err := dockerRun(ctx, "start", ws.ContainerID); err != nil {
+	if err := d.dockerRun(ctx, "start", ws.ContainerID); err != nil {
 		d.Destroy(ctx, ws)
 		return nil, fmt.Errorf("docker start: %w", err)
 	}
@@ -353,39 +371,29 @@ func domainListIncludesHost(allow []string, host string) bool {
 
 func (d *Docker) Exec(ctx context.Context, ws *Workspace, cmd []string) (*ExecResult, error) {
 	args := append([]string{"exec", ws.ContainerID}, cmd...)
-	c := exec.CommandContext(ctx, "docker", args...)
-
-	var stdout, stderr bytes.Buffer
-	c.Stdout = &stdout
-	c.Stderr = &stderr
-
-	err := c.Run()
-	result := &ExecResult{
-		Stdout: stdout.String(),
-		Stderr: stderr.String(),
-	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		result.ExitCode = exitErr.ExitCode()
-		return result, nil
-	}
+	stdout, stderr, exitCode, err := d.exec(ctx, "docker", args...)
 	if err != nil {
 		return nil, fmt.Errorf("docker exec: %w", err)
 	}
-	return result, nil
+	return &ExecResult{
+		ExitCode: exitCode,
+		Stdout:   stdout,
+		Stderr:   stderr,
+	}, nil
 }
 
 func (d *Docker) Destroy(ctx context.Context, ws *Workspace) error {
-	_ = dockerRun(ctx, "rm", "-f", ws.ContainerID)
+	_ = d.dockerRun(ctx, "rm", "-f", ws.ContainerID)
 	return nil
 }
 
-func dockerRun(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%w: %s", err, out.String())
+func (d *Docker) dockerRun(ctx context.Context, args ...string) error {
+	stdout, stderr, exitCode, err := d.exec(ctx, "docker", args...)
+	if err != nil {
+		return fmt.Errorf("%w: %s%s", err, stdout, stderr)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("exit status %d: %s%s", exitCode, stdout, stderr)
 	}
 	return nil
 }
