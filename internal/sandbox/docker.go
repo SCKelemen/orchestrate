@@ -5,9 +5,22 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync/atomic"
 )
+
+const (
+	defaultContainerUser = "1000:1000"
+	defaultPIDsLimit     = "512"
+)
+
+var defaultSandboxEnv = map[string]string{
+	"HOME":            "/tmp",
+	"TMPDIR":          "/tmp",
+	"XDG_CONFIG_HOME": "/tmp/.config",
+	"XDG_CACHE_HOME":  "/tmp/.cache",
+}
 
 // Docker implements Sandbox using Docker containers via os/exec.
 type Docker struct {
@@ -26,18 +39,7 @@ func (d *Docker) Create(ctx context.Context, opts CreateOpts) (*Workspace, error
 		RepoURL: opts.RepoURL,
 	}
 
-	args := []string{
-		"create",
-		"--name", ws.ID,
-		"--label", "orchestrate=true",
-		"-w", "/home/agent/workspace",
-	}
-
-	for k, v := range opts.EnvVars {
-		args = append(args, "-e", k+"="+v)
-	}
-
-	args = append(args, opts.Image, "sleep", "infinity")
+	args := d.createArgs(opts, ws.ID)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	var out bytes.Buffer
@@ -72,6 +74,42 @@ func (d *Docker) Create(ctx context.Context, opts CreateOpts) (*Workspace, error
 	}
 
 	return ws, nil
+}
+
+func (d *Docker) createArgs(opts CreateOpts, workspaceID string) []string {
+	args := []string{
+		"create",
+		"--name", workspaceID,
+		"--label", "orchestrate=true",
+		"--user", defaultContainerUser,
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--read-only",
+		"--pids-limit", defaultPIDsLimit,
+		"--tmpfs", "/tmp:rw,nosuid,nodev",
+		"--tmpfs", "/home/agent/workspace:rw,nosuid,nodev,uid=1000,gid=1000",
+		"-w", "/home/agent/workspace",
+	}
+
+	env := make(map[string]string, len(defaultSandboxEnv)+len(opts.EnvVars))
+	for k, v := range defaultSandboxEnv {
+		env[k] = v
+	}
+	for k, v := range opts.EnvVars {
+		env[k] = v
+	}
+
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "-e", k+"="+env[k])
+	}
+
+	args = append(args, opts.Image, "sleep", "infinity")
+	return args
 }
 
 func (d *Docker) Exec(ctx context.Context, ws *Workspace, cmd []string) (*ExecResult, error) {
