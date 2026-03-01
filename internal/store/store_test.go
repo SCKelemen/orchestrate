@@ -1048,3 +1048,127 @@ func TestDenyCIBARequest(t *testing.T) {
 		t.Errorf("state = %q, want DENIED", cr.State)
 	}
 }
+
+// --- Gap-filling tests ---
+
+func TestGetRunNotFound(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	run, err := s.GetRun(context.Background(), "nope")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run != nil {
+		t.Fatalf("expected nil, got %+v", run)
+	}
+}
+
+func TestGetScheduleNotFound(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	sc, err := s.GetSchedule(context.Background(), "nope")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sc != nil {
+		t.Fatalf("expected nil, got %+v", sc)
+	}
+}
+
+func TestGetUserNotFound(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	u, err := s.GetUser(context.Background(), "nope")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if u != nil {
+		t.Fatalf("expected nil, got %+v", u)
+	}
+}
+
+func TestGetCredentialNotFound(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	c, err := s.GetCredential(context.Background(), "nope")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c != nil {
+		t.Fatalf("expected nil, got %+v", c)
+	}
+}
+
+func TestListTasksPageToken(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		id := "t" + string(rune('a'+i))
+		s.CreateTask(ctx, id, CreateTaskParams{Prompt: "p", RepoURL: "r"})
+	}
+
+	// Get first page
+	page1, err := s.ListTasks(ctx, ListTasksParams{PageSize: 2})
+	if err != nil {
+		t.Fatalf("list page1: %v", err)
+	}
+	if len(page1) < 2 {
+		t.Fatalf("got %d tasks on page1, want at least 2", len(page1))
+	}
+
+	// Use the last item's ID as page token for continuation
+	page2, err := s.ListTasks(ctx, ListTasksParams{PageSize: 2, PageToken: page1[1].ID})
+	if err != nil {
+		t.Fatalf("list page2: %v", err)
+	}
+	if len(page2) < 1 {
+		t.Fatalf("got %d tasks on page2, want at least 1", len(page2))
+	}
+	// Ensure no overlap
+	if page2[0].ID == page1[0].ID || page2[0].ID == page1[1].ID {
+		t.Errorf("page2 overlaps with page1: %q", page2[0].ID)
+	}
+}
+
+func TestListRunsEmpty(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	s.CreateTask(ctx, "t1", CreateTaskParams{Prompt: "p", RepoURL: "r"})
+	runs, err := s.ListRuns(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Errorf("got %d runs, want 0", len(runs))
+	}
+}
+
+func TestAdvanceScheduleNilNextRun(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	next := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	s.CreateSchedule(ctx, "s1", CreateScheduleParams{
+		ScheduleExpr: "0 * * * *", ScheduleType: "CRON",
+		Prompt: "p", RepoURL: "r", NextRunTime: next,
+	})
+
+	now := time.Now().UTC()
+	// Pass nil nextRun to simulate a terminal schedule
+	if err := s.AdvanceSchedule(ctx, "s1", now, nil); err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+
+	sc, _ := s.GetSchedule(ctx, "s1")
+	if sc.RunCount != 1 {
+		t.Errorf("run_count = %d, want 1", sc.RunCount)
+	}
+	if sc.NextRunTime != nil {
+		t.Errorf("next_run_time = %v, want nil", sc.NextRunTime)
+	}
+}

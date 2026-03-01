@@ -30,8 +30,8 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mw := auth.NewMiddleware()
 	signer := auth.NewSigner([]byte("test-secret"), "orchestrate-test")
+	mw := auth.NewMiddleware(auth.NewBearerProvider("test-token"))
 	srv := NewServer(st, mw, signer, logger, WithInsecureEmailAuth(true))
 	return srv, st
 }
@@ -150,6 +150,34 @@ func TestDeviceVerifySubmitRejectsInvalidAction(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "action must be approve or deny") {
 		t.Fatalf("unexpected error body: %s", rr.Body.String())
+	}
+}
+
+func TestValidateRedirectURI(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		uri     string
+		wantErr bool
+	}{
+		{"http localhost ok", "http://localhost/callback", false},
+		{"http 127.0.0.1 ok", "http://127.0.0.1:8080/cb", false},
+		{"https remote ok", "https://example.com/cb", false},
+		{"ftp bad scheme", "ftp://example.com/cb", true},
+		{"http remote host bad", "http://example.com/cb", true},
+		{"empty string", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateRedirectURI(tt.uri)
+			if tt.wantErr && err == nil {
+				t.Errorf("validateRedirectURI(%q) = nil, want error", tt.uri)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("validateRedirectURI(%q) = %v, want nil", tt.uri, err)
+			}
+		})
 	}
 }
 

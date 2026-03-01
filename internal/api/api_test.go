@@ -595,3 +595,211 @@ func TestStreamLogsNoLogFile(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rr.Code)
 	}
 }
+
+// --- Gap-filling tests ---
+
+func TestUnknownTaskCustomMethod(t *testing.T) {
+	t.Parallel()
+	srv, st := newTestServer(t)
+	st.CreateTask(context.Background(), "t1", store.CreateTaskParams{Prompt: "p", RepoURL: "r"})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodPost, "/v1/tasks/t1/:unknown", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestUnknownRunAction(t *testing.T) {
+	t.Parallel()
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	st.CreateTask(ctx, "t1", store.CreateTaskParams{Prompt: "p", RepoURL: "r"})
+	st.CreateRun(ctx, "r1", store.CreateRunParams{TaskID: "t1", AgentIndex: 0, Branch: "b0"})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodGet, "/v1/tasks/t1/runs/r1/:unknown", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestUnknownScheduleAction(t *testing.T) {
+	t.Parallel()
+	srv, st := newTestServer(t)
+	st.CreateSchedule(context.Background(), "s1", store.CreateScheduleParams{
+		ScheduleExpr: "0 * * * *", ScheduleType: "CRON",
+		Prompt: "p", RepoURL: "r", NextRunTime: "2099-01-01T00:00:00Z",
+	})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodPost, "/v1/schedules/s1/:unknown", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestCreateScheduleMissingPrompt(t *testing.T) {
+	t.Parallel()
+	srv, _ := newTestServer(t)
+
+	body := createScheduleRequest{ScheduleExpr: "0 * * * *", RepoURL: "r"}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodPost, "/v1/schedules", body))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestCreateScheduleMissingRepoUrl(t *testing.T) {
+	t.Parallel()
+	srv, _ := newTestServer(t)
+
+	body := createScheduleRequest{ScheduleExpr: "0 * * * *", Prompt: "p"}
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodPost, "/v1/schedules", body))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestGetScheduleNotFound(t *testing.T) {
+	t.Parallel()
+	srv, _ := newTestServer(t)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodGet, "/v1/schedules/nope", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestDeleteScheduleNotFound(t *testing.T) {
+	t.Parallel()
+	srv, _ := newTestServer(t)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodDelete, "/v1/schedules/nope", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestPauseAlreadyPausedSchedule(t *testing.T) {
+	t.Parallel()
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+
+	st.CreateSchedule(ctx, "s1", store.CreateScheduleParams{
+		ScheduleExpr: "0 * * * *", ScheduleType: "CRON",
+		Prompt: "p", RepoURL: "r", NextRunTime: "2099-01-01T00:00:00Z",
+	})
+	st.UpdateScheduleState(ctx, "s1", store.SchedulePaused)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodPost, "/v1/schedules/s1/:pause", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestResumeAlreadyActiveSchedule(t *testing.T) {
+	t.Parallel()
+	srv, st := newTestServer(t)
+
+	st.CreateSchedule(context.Background(), "s1", store.CreateScheduleParams{
+		ScheduleExpr: "0 * * * *", ScheduleType: "CRON",
+		Prompt: "p", RepoURL: "r", NextRunTime: "2099-01-01T00:00:00Z",
+	})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodPost, "/v1/schedules/s1/:resume", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestRetryTaskWrongState(t *testing.T) {
+	t.Parallel()
+	srv, st := newTestServer(t)
+
+	// Task in QUEUED state cannot be retried (only FAILED/CANCELLED can)
+	st.CreateTask(context.Background(), "t1", store.CreateTaskParams{Prompt: "p", RepoURL: "r"})
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodPost, "/v1/tasks/t1/:retry", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestCancelTaskNotFound(t *testing.T) {
+	t.Parallel()
+	srv, _ := newTestServer(t)
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, authedRequest(http.MethodPost, "/v1/tasks/nope/:cancel", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestUnsupportedGrantType(t *testing.T) {
+	t.Parallel()
+	srv, _ := newTestServer(t)
+
+	body := map[string]string{"grant_type": "magic"}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/token", nil)
+	req.Header.Set("Content-Type", "application/json")
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(body)
+	req = httptest.NewRequest(http.MethodPost, "/v1/auth/token", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "unsupported grant_type") {
+		t.Errorf("body = %s", rr.Body.String())
+	}
+}
+
+func TestRevokeInvalidToken(t *testing.T) {
+	t.Parallel()
+	srv, _ := newTestServer(t)
+
+	body := map[string]string{"refresh_token": "invalid-token-that-does-not-exist"}
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/token/:revoke", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	// Per RFC 7009, revoking an invalid token is not an error
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (RFC 7009)", rr.Code)
+	}
+}
+
+func TestRefreshTokenMissing(t *testing.T) {
+	t.Parallel()
+	srv, _ := newTestServer(t)
+
+	body := map[string]string{"grant_type": "refresh_token"}
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/token", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "refresh_token is required") {
+		t.Errorf("body = %s", rr.Body.String())
+	}
+}
