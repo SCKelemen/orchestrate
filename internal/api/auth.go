@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net"
@@ -568,6 +569,15 @@ func (s *Server) handleDevicePoll(w http.ResponseWriter, r *http.Request) {
 	case store.DeviceCodeDenied:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "access_denied"})
 	case store.DeviceCodeApproved:
+		if err := s.store.ConsumeDeviceCode(r.Context(), dc.DeviceCode); err != nil {
+			if errors.Is(err, store.ErrDeviceCodeNotConsumable) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
+				return
+			}
+			s.logger.Error("consume device code", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
 		if dc.UserID == nil {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
@@ -589,6 +599,8 @@ func (s *Server) handleDevicePoll(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)
+	case store.DeviceCodeConsumed:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
 	default:
 		writeError(w, http.StatusInternalServerError, "unknown state")
 	}
@@ -738,6 +750,15 @@ func (s *Server) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Request, r
 	case store.DeviceCodeDenied:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "access_denied"})
 	case store.DeviceCodeApproved:
+		if err := s.store.ConsumeDeviceCode(r.Context(), dc.DeviceCode); err != nil {
+			if errors.Is(err, store.ErrDeviceCodeNotConsumable) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
+				return
+			}
+			s.logger.Error("consume device code", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
 		if dc.UserID == nil {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
@@ -759,6 +780,10 @@ func (s *Server) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Request, r
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)
+	case store.DeviceCodeConsumed:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
+	default:
+		writeError(w, http.StatusInternalServerError, "unknown state")
 	}
 }
 
@@ -1123,6 +1148,15 @@ func (s *Server) handleCIBAPoll(w http.ResponseWriter, r *http.Request) {
 	case store.CIBADenied:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "access_denied"})
 	case store.CIBAApproved:
+		if err := s.store.ConsumeCIBARequest(r.Context(), cr.AuthReqID); err != nil {
+			if errors.Is(err, store.ErrCIBARequestNotConsumable) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
+				return
+			}
+			s.logger.Error("consume ciba request", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
 		user, err := s.store.GetUser(r.Context(), cr.UserID)
 		if err != nil || user == nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
@@ -1140,6 +1174,10 @@ func (s *Server) handleCIBAPoll(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)
+	case store.CIBAConsumed:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
+	default:
+		writeError(w, http.StatusInternalServerError, "unknown state")
 	}
 }
 
@@ -1243,6 +1281,15 @@ func (s *Server) handleCIBAGrant(w http.ResponseWriter, r *http.Request, req *to
 	case store.CIBADenied:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "access_denied"})
 	case store.CIBAApproved:
+		if err := s.store.ConsumeCIBARequest(r.Context(), cr.AuthReqID); err != nil {
+			if errors.Is(err, store.ErrCIBARequestNotConsumable) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
+				return
+			}
+			s.logger.Error("consume ciba request", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
 		user, err := s.store.GetUser(r.Context(), cr.UserID)
 		if err != nil || user == nil {
 			writeError(w, http.StatusInternalServerError, "user not found")
@@ -1260,11 +1307,28 @@ func (s *Server) handleCIBAGrant(w http.ResponseWriter, r *http.Request, req *to
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)
+	case store.CIBAConsumed:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant"})
+	default:
+		writeError(w, http.StatusInternalServerError, "unknown state")
 	}
 }
 
 // fireCIBAWebhook sends a notification to the configured webhook URL.
 func (s *Server) fireCIBAWebhook(webhookURL, authReqID, loginHint, bindingMsg string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	u, err := url.Parse(webhookURL)
+	if err != nil {
+		s.logger.Error("ciba webhook", "error", err, "url", webhookURL)
+		return
+	}
+	if err := validateWebhookDispatchTarget(ctx, u); err != nil {
+		s.logger.Error("ciba webhook blocked", "error", err, "url", webhookURL)
+		return
+	}
+
 	body, err := json.Marshal(map[string]string{
 		"auth_req_id":     authReqID,
 		"login_hint":      loginHint,
@@ -1274,14 +1338,36 @@ func (s *Server) fireCIBAWebhook(webhookURL, authReqID, loginHint, bindingMsg st
 		s.logger.Error("ciba webhook", "error", err, "url", webhookURL)
 		return
 	}
-	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
 	if err != nil {
 		s.logger.Error("ciba webhook", "error", err, "url", webhookURL)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	transport := &http.Transport{
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			if err := validateWebhookResolvedHost(ctx, host); err != nil {
+				return nil, err
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
+		},
+	}
+	defer transport.CloseIdleConnections()
+
+	client := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		s.logger.Error("ciba webhook", "error", err, "url", webhookURL)
@@ -1735,4 +1821,60 @@ func validateWebhookURL(raw string) error {
 		}
 	}
 	return nil
+}
+
+func validateWebhookDispatchTarget(ctx context.Context, u *url.URL) error {
+	if err := validateWebhookURL(u.String()); err != nil {
+		return err
+	}
+	return validateWebhookResolvedHost(ctx, u.Hostname())
+}
+
+func validateWebhookResolvedHost(ctx context.Context, host string) error {
+	if host == "" {
+		return fmt.Errorf("host is required")
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		if isDisallowedWebhookIP(ip) {
+			return fmt.Errorf("private or local IP targets are not allowed")
+		}
+		return nil
+	}
+
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("resolve host: %w", err)
+	}
+	if len(addrs) == 0 {
+		return fmt.Errorf("host has no resolved IPs")
+	}
+	for _, addr := range addrs {
+		if isDisallowedWebhookIP(addr.IP) {
+			return fmt.Errorf("private or local IP targets are not allowed")
+		}
+	}
+	return nil
+}
+
+func isDisallowedWebhookIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+
+	if v4 := ip.To4(); v4 != nil {
+		// Block CGNAT and other non-routable IPv4 ranges not covered by net.IP helpers above.
+		if v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
+			return true
+		}
+		if v4[0] == 0 {
+			return true
+		}
+	}
+
+	return false
 }

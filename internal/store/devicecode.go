@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -14,7 +15,10 @@ const (
 	DeviceCodeApproved DeviceCodeState = "APPROVED"
 	DeviceCodeDenied   DeviceCodeState = "DENIED"
 	DeviceCodeExpired  DeviceCodeState = "EXPIRED"
+	DeviceCodeConsumed DeviceCodeState = "CONSUMED"
 )
+
+var ErrDeviceCodeNotConsumable = errors.New("device code not approved or already consumed")
 
 // DeviceCode represents a device authorization code.
 type DeviceCode struct {
@@ -106,4 +110,20 @@ func (s *Store) DenyDeviceCode(ctx context.Context, deviceCode string) error {
 		deviceCode,
 	)
 	return err
+}
+
+// ConsumeDeviceCode atomically marks an approved device code as consumed.
+func (s *Store) ConsumeDeviceCode(ctx context.Context, deviceCode string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE device_codes SET state = 'CONSUMED' WHERE device_code = ? AND state = 'APPROVED'`,
+		deviceCode,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrDeviceCodeNotConsumable
+	}
+	return nil
 }

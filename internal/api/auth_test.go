@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -387,6 +388,231 @@ func TestValidateWebhookURL(t *testing.T) {
 				t.Fatalf("unexpected error for %q: %v", tc.raw, err)
 			}
 		})
+	}
+}
+
+func TestIsDisallowedWebhookIP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		ip   string
+		want bool
+	}{
+		{name: "loopback", ip: "127.0.0.1", want: true},
+		{name: "private", ip: "10.1.2.3", want: true},
+		{name: "cgnat", ip: "100.64.10.10", want: true},
+		{name: "public", ip: "8.8.8.8", want: false},
+		{name: "public-v6", ip: "2606:4700:4700::1111", want: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := isDisallowedWebhookIP(net.ParseIP(tc.ip))
+			if got != tc.want {
+				t.Fatalf("isDisallowedWebhookIP(%s)=%v want=%v", tc.ip, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDeviceCodeGrantCanOnlyBeUsedOnce(t *testing.T) {
+	t.Parallel()
+
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+
+	user, err := st.CreateUser(ctx, "dev-user", store.CreateUserParams{
+		DisplayName: "Device User",
+		Email:       "device@example.com",
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	code := "device-code-1"
+	if err := st.CreateDeviceCode(ctx, store.CreateDeviceCodeParams{
+		DeviceCode: code,
+		UserCode:   "ABCD-EFGH",
+		ClientID:   "cli",
+		Scope:      "",
+		ExpiresAt:  time.Now().Add(5 * time.Minute).Format(time.RFC3339),
+		Interval:   5,
+	}); err != nil {
+		t.Fatalf("create device code: %v", err)
+	}
+	if err := st.ApproveDeviceCode(ctx, code, user.ID); err != nil {
+		t.Fatalf("approve device code: %v", err)
+	}
+
+	body := `{"grant_type":"urn:ietf:params:oauth:grant-type:device_code","device_code":"` + code + `"}`
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/auth/token", strings.NewReader(body))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRR := httptest.NewRecorder()
+	srv.ServeHTTP(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("first exchange status=%d want=200 body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/auth/token", strings.NewReader(body))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRR := httptest.NewRecorder()
+	srv.ServeHTTP(secondRR, secondReq)
+	if secondRR.Code != http.StatusBadRequest {
+		t.Fatalf("second exchange status=%d want=400 body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "invalid_grant") {
+		t.Fatalf("unexpected second exchange body: %s", secondRR.Body.String())
+	}
+}
+
+func TestDevicePollCanOnlyBeUsedOnce(t *testing.T) {
+	t.Parallel()
+
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+
+	user, err := st.CreateUser(ctx, "dev-user-2", store.CreateUserParams{
+		DisplayName: "Device User 2",
+		Email:       "device2@example.com",
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	code := "device-code-2"
+	if err := st.CreateDeviceCode(ctx, store.CreateDeviceCodeParams{
+		DeviceCode: code,
+		UserCode:   "WXYZ-1234",
+		ClientID:   "cli",
+		Scope:      "",
+		ExpiresAt:  time.Now().Add(5 * time.Minute).Format(time.RFC3339),
+		Interval:   5,
+	}); err != nil {
+		t.Fatalf("create device code: %v", err)
+	}
+	if err := st.ApproveDeviceCode(ctx, code, user.ID); err != nil {
+		t.Fatalf("approve device code: %v", err)
+	}
+
+	body := `{"device_code":"` + code + `"}`
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/auth/device/:poll", strings.NewReader(body))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRR := httptest.NewRecorder()
+	srv.ServeHTTP(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("first poll status=%d want=200 body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/auth/device/:poll", strings.NewReader(body))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRR := httptest.NewRecorder()
+	srv.ServeHTTP(secondRR, secondReq)
+	if secondRR.Code != http.StatusBadRequest {
+		t.Fatalf("second poll status=%d want=400 body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "invalid_grant") {
+		t.Fatalf("unexpected second poll body: %s", secondRR.Body.String())
+	}
+}
+
+func TestCIBAGrantCanOnlyBeUsedOnce(t *testing.T) {
+	t.Parallel()
+
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+
+	if _, err := st.CreateUser(ctx, "ciba-user", store.CreateUserParams{
+		DisplayName: "CIBA User",
+		Email:       "ciba@example.com",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := st.CreateCIBARequest(ctx, store.CreateCIBARequestParams{
+		AuthReqID:  "ciba-req-1",
+		UserID:     "ciba-user",
+		ClientID:   "cli",
+		ExpiresAt:  time.Now().Add(5 * time.Minute).Format(time.RFC3339),
+		Interval:   5,
+		WebhookURL: "",
+	}); err != nil {
+		t.Fatalf("create ciba request: %v", err)
+	}
+	if err := st.ApproveCIBARequest(ctx, "ciba-req-1"); err != nil {
+		t.Fatalf("approve ciba request: %v", err)
+	}
+
+	body := `{"grant_type":"urn:openid:params:grant-type:ciba","auth_req_id":"ciba-req-1"}`
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/auth/token", strings.NewReader(body))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRR := httptest.NewRecorder()
+	srv.ServeHTTP(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("first exchange status=%d want=200 body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/auth/token", strings.NewReader(body))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRR := httptest.NewRecorder()
+	srv.ServeHTTP(secondRR, secondReq)
+	if secondRR.Code != http.StatusBadRequest {
+		t.Fatalf("second exchange status=%d want=400 body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "invalid_grant") {
+		t.Fatalf("unexpected second exchange body: %s", secondRR.Body.String())
+	}
+}
+
+func TestCIBAPollCanOnlyBeUsedOnce(t *testing.T) {
+	t.Parallel()
+
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+
+	if _, err := st.CreateUser(ctx, "ciba-user-2", store.CreateUserParams{
+		DisplayName: "CIBA User 2",
+		Email:       "ciba2@example.com",
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := st.CreateCIBARequest(ctx, store.CreateCIBARequestParams{
+		AuthReqID:  "ciba-req-2",
+		UserID:     "ciba-user-2",
+		ClientID:   "cli",
+		ExpiresAt:  time.Now().Add(5 * time.Minute).Format(time.RFC3339),
+		Interval:   5,
+		WebhookURL: "",
+	}); err != nil {
+		t.Fatalf("create ciba request: %v", err)
+	}
+	if err := st.ApproveCIBARequest(ctx, "ciba-req-2"); err != nil {
+		t.Fatalf("approve ciba request: %v", err)
+	}
+
+	body := `{"auth_req_id":"ciba-req-2"}`
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/auth/ciba/:poll", strings.NewReader(body))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRR := httptest.NewRecorder()
+	srv.ServeHTTP(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("first poll status=%d want=200 body=%s", firstRR.Code, firstRR.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/auth/ciba/:poll", strings.NewReader(body))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRR := httptest.NewRecorder()
+	srv.ServeHTTP(secondRR, secondReq)
+	if secondRR.Code != http.StatusBadRequest {
+		t.Fatalf("second poll status=%d want=400 body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	if !strings.Contains(secondRR.Body.String(), "invalid_grant") {
+		t.Fatalf("unexpected second poll body: %s", secondRR.Body.String())
 	}
 }
 

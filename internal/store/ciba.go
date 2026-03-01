@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -14,7 +15,10 @@ const (
 	CIBAApproved CIBAState = "APPROVED"
 	CIBADenied   CIBAState = "DENIED"
 	CIBAExpired  CIBAState = "EXPIRED"
+	CIBAConsumed CIBAState = "CONSUMED"
 )
+
+var ErrCIBARequestNotConsumable = errors.New("ciba request not approved or already consumed")
 
 // CIBARequest represents a CIBA backchannel authentication request.
 type CIBARequest struct {
@@ -92,4 +96,20 @@ func (s *Store) DenyCIBARequest(ctx context.Context, authReqID string) error {
 		authReqID,
 	)
 	return err
+}
+
+// ConsumeCIBARequest atomically marks an approved CIBA request as consumed.
+func (s *Store) ConsumeCIBARequest(ctx context.Context, authReqID string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE ciba_requests SET state = 'CONSUMED' WHERE auth_req_id = ? AND state = 'APPROVED'`,
+		authReqID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrCIBARequestNotConsumable
+	}
+	return nil
 }
