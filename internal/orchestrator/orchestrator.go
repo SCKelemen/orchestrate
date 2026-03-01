@@ -45,6 +45,8 @@ func New(s *store.Store, sb sandbox.Sandbox, agents map[string]agent.Agent, defa
 			store.StrategyInvestigate: Investigate{},
 			store.StrategyCompete:     Compete{},
 			store.StrategyBatch:       Batch{},
+			store.StrategyAdversarial: Adversarial{},
+			store.StrategyCodeAndTest: CodeAndTest{},
 		},
 	}
 	return o

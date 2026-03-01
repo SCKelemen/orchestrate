@@ -20,7 +20,12 @@ func normalizeStrategy(raw string) (store.Strategy, error) {
 
 	s := store.Strategy(raw)
 	switch s {
-	case store.StrategyImplement, store.StrategyInvestigate, store.StrategyCompete, store.StrategyBatch:
+	case store.StrategyImplement,
+		store.StrategyInvestigate,
+		store.StrategyCompete,
+		store.StrategyBatch,
+		store.StrategyAdversarial,
+		store.StrategyCodeAndTest:
 		return s, nil
 	default:
 		return "", fmt.Errorf("unsupported strategy: %s", raw)

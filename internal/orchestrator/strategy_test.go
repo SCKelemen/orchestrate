@@ -277,3 +277,122 @@ func TestBatchName(t *testing.T) {
 		t.Errorf("name = %q", s.Name())
 	}
 }
+
+// --- Adversarial ---
+
+func TestAdversarialPlan(t *testing.T) {
+	t.Parallel()
+
+	s := Adversarial{}
+	task := &store.Task{ID: "adv1", Prompt: "implement feature X"}
+	plans, err := s.Plan(context.Background(), task)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("got %d plans, want 2", len(plans))
+	}
+	if plans[0].Branch != "orchestrate/adv1/implementer" {
+		t.Fatalf("implementer branch = %q", plans[0].Branch)
+	}
+	if plans[1].Branch != "orchestrate/adv1/reviewer" {
+		t.Fatalf("reviewer branch = %q", plans[1].Branch)
+	}
+	if plans[0].Index != 0 || plans[1].Index != 1 {
+		t.Fatalf("indexes = [%d,%d] want [0,1]", plans[0].Index, plans[1].Index)
+	}
+}
+
+func TestAdversarialEvaluateRequiresBothSuccess(t *testing.T) {
+	t.Parallel()
+
+	s := Adversarial{}
+	eval, err := s.Evaluate(context.Background(), nil, []AgentResult{
+		{Index: 0, ExitCode: 0},
+		{Index: 1, ExitCode: 0},
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if !eval.Success {
+		t.Fatal("expected success when both agents succeed")
+	}
+
+	eval, err = s.Evaluate(context.Background(), nil, []AgentResult{
+		{Index: 0, ExitCode: 0},
+		{Index: 1, ExitCode: 1},
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if eval.Success {
+		t.Fatal("expected failure when reviewer fails")
+	}
+}
+
+func TestAdversarialName(t *testing.T) {
+	t.Parallel()
+
+	s := Adversarial{}
+	if s.Name() != "ADVERSARIAL" {
+		t.Fatalf("name = %q", s.Name())
+	}
+}
+
+// --- CodeAndTest ---
+
+func TestCodeAndTestPlan(t *testing.T) {
+	t.Parallel()
+
+	s := CodeAndTest{}
+	task := &store.Task{ID: "ct1", Prompt: "add endpoint Y"}
+	plans, err := s.Plan(context.Background(), task)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("got %d plans, want 2", len(plans))
+	}
+	if plans[0].Branch != "orchestrate/ct1/code" {
+		t.Fatalf("code branch = %q", plans[0].Branch)
+	}
+	if plans[1].Branch != "orchestrate/ct1/tests" {
+		t.Fatalf("tests branch = %q", plans[1].Branch)
+	}
+}
+
+func TestCodeAndTestEvaluateRequiresBothSuccess(t *testing.T) {
+	t.Parallel()
+
+	s := CodeAndTest{}
+	eval, err := s.Evaluate(context.Background(), nil, []AgentResult{
+		{Index: 0, ExitCode: 0},
+		{Index: 1, ExitCode: 0},
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if !eval.Success {
+		t.Fatal("expected success when both agents succeed")
+	}
+
+	eval, err = s.Evaluate(context.Background(), nil, []AgentResult{
+		{Index: 0, ExitCode: 1},
+		{Index: 1, ExitCode: 0},
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if eval.Success {
+		t.Fatal("expected failure when code writer fails")
+	}
+}
+
+func TestCodeAndTestName(t *testing.T) {
+	t.Parallel()
+
+	s := CodeAndTest{}
+	if s.Name() != "CODE_AND_TEST" {
+		t.Fatalf("name = %q", s.Name())
+	}
+}

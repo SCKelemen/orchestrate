@@ -26,6 +26,8 @@ const (
 	StrategyInvestigate Strategy = "INVESTIGATE"
 	StrategyCompete     Strategy = "COMPETE"
 	StrategyBatch       Strategy = "BATCH"
+	StrategyAdversarial Strategy = "ADVERSARIAL"
+	StrategyCodeAndTest Strategy = "CODE_AND_TEST"
 )
 
 // Task represents a unit of work for one or more agents.

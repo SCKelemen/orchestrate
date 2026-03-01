@@ -11,7 +11,7 @@ Orchestrate gives you:
 - An HTTP API server for task and schedule management
 - A CLI for day-to-day operations (`submit`, `list`, `status`, `logs`, `schedule`, `auth`)
 - A scheduler that dequeues queued work and triggers scheduled work
-- Strategy-based orchestration (`IMPLEMENT`, `INVESTIGATE`, `COMPETE`, `BATCH`)
+- Strategy-based orchestration (`IMPLEMENT`, `INVESTIGATE`, `COMPETE`, `BATCH`, `ADVERSARIAL`, `CODE_AND_TEST`)
 - Backend selection per task/schedule (`claude` and `codex`)
 - Persistent state in SQLite (tasks, runs, schedules, users, sessions, auth artifacts)
 
@@ -19,6 +19,8 @@ Orchestrate gives you:
 
 - Run one-off coding tasks against a repo + base branch
 - Fan out work across multiple agents in parallel (`COMPETE` / `BATCH`)
+- Run adversarial review mode (`ADVERSARIAL`) with implementer + reviewer roles
+- Split work into code + tests roles (`CODE_AND_TEST`)
 - Run recurring jobs using cron or ISO-8601 intervals
 - Keep per-run execution logs and run state history
 - Authenticate via static bearer token (bootstrap/admin)

@@ -48,6 +48,33 @@ func TestCreateTaskRejectsUnsupportedStrategy(t *testing.T) {
 	}
 }
 
+func TestCreateTaskAcceptsAdversarialStrategy(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _, adminToken := newSecuredTestServer(t)
+	body := `{"prompt":"do work","repoUrl":"https://example.com/repo.git","strategy":"ADVERSARIAL"}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Strategy string `json:"strategy"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Strategy != "ADVERSARIAL" {
+		t.Fatalf("strategy=%q want=ADVERSARIAL", out.Strategy)
+	}
+}
+
 func TestCreateTaskRejectsOversizedPrompt(t *testing.T) {
 	t.Parallel()
 
@@ -91,6 +118,38 @@ func TestCreateScheduleRejectsTooManyAgents(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "agentCount") {
 		t.Fatalf("unexpected body: %s", rr.Body.String())
+	}
+}
+
+func TestCreateScheduleAcceptsCodeAndTestStrategy(t *testing.T) {
+	t.Parallel()
+
+	srv, _, _, adminToken := newSecuredTestServer(t)
+	body := `{
+		"scheduleExpr":"0 * * * *",
+		"prompt":"do scheduled work",
+		"repoUrl":"https://example.com/repo.git",
+		"strategy":"CODE_AND_TEST"
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/schedules", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		Strategy string `json:"strategy"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Strategy != "CODE_AND_TEST" {
+		t.Fatalf("strategy=%q want=CODE_AND_TEST", out.Strategy)
 	}
 }
 
