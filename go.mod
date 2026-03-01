@@ -1,6 +1,6 @@
 module github.com/SCKelemen/orchestrate
 
-go 1.24.0
+go 1.24.13
 
 require (
 	github.com/SCKelemen/clix/v2 v2.4.0
