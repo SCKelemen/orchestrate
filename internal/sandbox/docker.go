@@ -101,7 +101,7 @@ func NewDocker(dataDir string, opts ...DockerOption) *Docker {
 }
 
 func defaultExec(ctx context.Context, name string, args ...string) (string, string, int, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204 -- args are constructed by createArgs, not user input
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

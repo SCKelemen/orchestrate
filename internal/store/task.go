@@ -164,7 +164,7 @@ func (s *Store) ListTasks(ctx context.Context, p ListTasksParams) ([]*Task, erro
 			if i > 0 {
 				query += " AND "
 			}
-			query += w
+			query += w // #nosec G202 -- WHERE clauses are hardcoded; all values use ? placeholders
 		}
 	}
 	query += " ORDER BY priority DESC, create_time ASC LIMIT ?"

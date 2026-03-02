@@ -62,7 +62,7 @@ func newServerCmd() *clix.Command {
 		token := os.Getenv("ORCHESTRATE_TOKEN")
 		if token == "" {
 			tokenPath := filepath.Join(dir, "token")
-			data, err := os.ReadFile(tokenPath)
+			data, err := os.ReadFile(tokenPath) // #nosec G304 -- path is constructed from dataDir constant
 			if err != nil {
 				b := make([]byte, 32)
 				if _, err := rand.Read(b); err != nil {
@@ -192,7 +192,7 @@ func newServerCmd() *clix.Command {
 // Stored at ~/.local/share/orchestrate/jwt.key with mode 0600.
 func loadOrGenerateSecret(dir string) ([]byte, error) {
 	path := filepath.Join(dir, "jwt.key")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is constructed from dataDir constant
 	if err == nil && len(data) == 32 {
 		return data, nil
 	}

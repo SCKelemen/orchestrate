@@ -156,7 +156,7 @@ func (s *Store) ListSchedules(ctx context.Context, p ListSchedulesParams) ([]*Sc
 			if i > 0 {
 				query += " AND "
 			}
-			query += w
+			query += w // #nosec G202 -- WHERE clauses are hardcoded; all values use ? placeholders
 		}
 	}
 	query += " ORDER BY create_time ASC LIMIT ?"

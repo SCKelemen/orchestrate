@@ -645,10 +645,10 @@ func (s *Server) handleDeviceVerifySubmit(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userCode := auth.NormalizeUserCode(r.FormValue("user_code"))
-	action := r.FormValue("action")
-	email := r.FormValue("email")
-	displayName := r.FormValue("display_name")
+	userCode := auth.NormalizeUserCode(r.FormValue("user_code")) // #nosec G120 -- body limited by parseFormWithBodyLimit above
+	action := r.FormValue("action")                              // #nosec G120
+	email := r.FormValue("email")                                // #nosec G120
+	displayName := r.FormValue("display_name")                   // #nosec G120
 
 	if userCode == "" {
 		writeError(w, http.StatusBadRequest, "user_code is required")
@@ -846,14 +846,14 @@ func (s *Server) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := r.FormValue("email")
-	displayName := r.FormValue("display_name")
-	redirectURI := r.FormValue("redirect_uri")
-	codeChallenge := r.FormValue("code_challenge")
-	codeChallengeMethod := r.FormValue("code_challenge_method")
-	state := r.FormValue("state")
-	clientID := r.FormValue("client_id")
-	scope := r.FormValue("scope")
+	email := r.FormValue("email")                               // #nosec G120 -- body limited by parseFormWithBodyLimit above
+	displayName := r.FormValue("display_name")                  // #nosec G120
+	redirectURI := r.FormValue("redirect_uri")                  // #nosec G120
+	codeChallenge := r.FormValue("code_challenge")              // #nosec G120
+	codeChallengeMethod := r.FormValue("code_challenge_method") // #nosec G120
+	state := r.FormValue("state")                               // #nosec G120
+	clientID := r.FormValue("client_id")                        // #nosec G120
+	scope := r.FormValue("scope")                               // #nosec G120
 
 	if email == "" {
 		writeError(w, http.StatusBadRequest, "email is required")
@@ -1082,9 +1082,10 @@ func (s *Server) handleCIBAInitiate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fire webhook notification if configured
+	// Fire webhook notification if configured — intentionally detached from request context
+	// so the webhook delivery is not cancelled when the HTTP response completes.
 	if req.WebhookURL != "" {
-		go s.fireCIBAWebhook(req.WebhookURL, authReqID, req.LoginHint, req.BindingMessage)
+		go s.fireCIBAWebhook(req.WebhookURL, authReqID, req.LoginHint, req.BindingMessage) // #nosec G118
 	}
 
 	// CIBA Section 7.3 - Successful Authentication Response

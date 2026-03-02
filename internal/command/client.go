@@ -60,7 +60,7 @@ func LoadCredentials() (*Credentials, error) {
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
 		_, _ = fmt.Fprintf(os.Stderr, "WARNING: credentials file %s has permissions %04o; should be 0600\n", path, perm)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path from credentialsPath() under user home dir
 	if err != nil {
 		return nil, err
 	}
@@ -74,10 +74,10 @@ func LoadCredentials() (*Credentials, error) {
 // SaveCredentials writes credentials to disk with restricted permissions.
 func SaveCredentials(creds *Credentials) error {
 	path := credentialsPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(creds, "", "    ")
+	data, err := json.MarshalIndent(creds, "", "    ") // #nosec G117 -- credentials file is intentionally written with 0600 perms
 	if err != nil {
 		return err
 	}

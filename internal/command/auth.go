@@ -543,10 +543,10 @@ func newRandomState() (string, error) {
 func openBrowser(url string) {
 	switch runtime.GOOS {
 	case "darwin":
-		_ = exec.Command("open", url).Start()
+		_ = exec.Command("open", url).Start() // #nosec G204 -- url is server-generated verification URI
 	case "linux":
-		_ = exec.Command("xdg-open", url).Start()
+		_ = exec.Command("xdg-open", url).Start() // #nosec G204 -- url is server-generated verification URI
 	case "windows":
-		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start() // #nosec G204 -- url is server-generated verification URI
 	}
 }

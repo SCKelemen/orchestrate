@@ -134,7 +134,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// #nosec G703 -- logPath is constrained by resolveRunLogPath (run-id filename and optional logs root).
+	// #nosec G304,G703 -- logPath is constrained by resolveRunLogPath (run-id filename under logs root).
 	f, err := os.Open(logPath)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "log file not found")
@@ -163,7 +163,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		line := sanitizeSSEData(scanner.Text())
-		n, _ := fmt.Fprintf(w, "data: %s\n\n", line)
+		n, _ := fmt.Fprintf(w, "data: %s\n\n", line) // #nosec G705 -- line is sanitized by sanitizeSSEData
 		streamed += int64(n)
 		flusher.Flush()
 		if streamed >= maxBytes {

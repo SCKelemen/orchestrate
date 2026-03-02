@@ -29,7 +29,7 @@ func (rc *RepoCache) EnsureClone(ctx context.Context, repoURL string) (string, e
 
 	if _, err := os.Stat(clonePath); os.IsNotExist(err) {
 		// Fresh bare clone
-		if err := os.MkdirAll(rc.dir, 0o755); err != nil {
+		if err := os.MkdirAll(rc.dir, 0o750); err != nil {
 			return "", fmt.Errorf("mkdir repos: %w", err)
 		}
 		if err := gitRun(ctx, rc.dir, "clone", "--bare", repoURL, clonePath); err != nil {
@@ -47,7 +47,7 @@ func (rc *RepoCache) EnsureClone(ctx context.Context, repoURL string) (string, e
 
 // CreateWorktree creates a git worktree from a bare clone.
 func (rc *RepoCache) CreateWorktree(ctx context.Context, barePath, worktreeDir, baseRef, branch string) error {
-	if err := os.MkdirAll(filepath.Dir(worktreeDir), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(worktreeDir), 0o750); err != nil {
 		return fmt.Errorf("mkdir worktree parent: %w", err)
 	}
 
@@ -66,7 +66,7 @@ func (rc *RepoCache) RemoveWorktree(ctx context.Context, barePath, worktreeDir s
 }
 
 func gitRun(ctx context.Context, dir string, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- args are constructed internally, not from user input
 	cmd.Dir = dir
 	var out bytes.Buffer
 	cmd.Stdout = &out
