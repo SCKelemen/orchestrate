@@ -236,7 +236,7 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	s.store.RevokeSession(r.Context(), session.ID)
+	_ = s.store.RevokeSession(r.Context(), session.ID)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -616,7 +616,7 @@ func (s *Server) handleDeviceVerifyPage(w http.ResponseWriter, r *http.Request) 
 
 	userCode := r.URL.Query().Get("user_code")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!DOCTYPE html>
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html><head><title>Device Verification</title>
 <style>body{font-family:system-ui;max-width:400px;margin:80px auto;padding:0 20px}
 input{width:100%%;padding:8px;margin:4px 0 12px;box-sizing:border-box;text-align:center;font-size:1.2em;letter-spacing:0.1em}
@@ -666,7 +666,7 @@ func (s *Server) handleDeviceVerifySubmit(w http.ResponseWriter, r *http.Request
 	dc, err := s.store.GetDeviceCodeByUserCode(r.Context(), userCode)
 	if err != nil || dc == nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Invalid Code</h2><p>The code was not found or has expired. Please try again.</p></body></html>`)
+		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Invalid Code</h2><p>The code was not found or has expired. Please try again.</p></body></html>`)
 		return
 	}
 
@@ -679,14 +679,14 @@ func (s *Server) handleDeviceVerifySubmit(w http.ResponseWriter, r *http.Request
 	}
 	if time.Now().After(expiresAt) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Code Expired</h2><p>This code has expired. Please request a new one.</p></body></html>`)
+		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Code Expired</h2><p>This code has expired. Please request a new one.</p></body></html>`)
 		return
 	}
 
 	if action == "deny" {
-		s.store.DenyDeviceCode(r.Context(), dc.DeviceCode)
+		_ = s.store.DenyDeviceCode(r.Context(), dc.DeviceCode)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Denied</h2><p>Authorization was denied.</p></body></html>`)
+		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Denied</h2><p>Authorization was denied.</p></body></html>`)
 		return
 	}
 
@@ -716,7 +716,7 @@ func (s *Server) handleDeviceVerifySubmit(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Approved!</h2><p>You have authorized the device. You can close this tab.</p></body></html>`)
+	_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Approved!</h2><p>You have authorized the device. You can close this tab.</p></body></html>`)
 }
 
 // handleDeviceCodeGrant exchanges an approved device code for tokens.
@@ -806,7 +806,7 @@ func (s *Server) handleAuthorizePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!DOCTYPE html>
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html><head><title>Orchestrate Login</title>
 <style>body{font-family:system-ui;max-width:400px;margin:80px auto;padding:0 20px}
 input{width:100%%;padding:8px;margin:4px 0 12px;box-sizing:border-box}
@@ -1373,7 +1373,7 @@ func (s *Server) fireCIBAWebhook(webhookURL, authReqID, loginHint, bindingMsg st
 		s.logger.Error("ciba webhook", "error", err, "url", webhookURL)
 		return
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 // handleWebAuthnRegister dispatches WebAuthn registration ceremony actions.

@@ -50,12 +50,12 @@ func newListCmd() *clix.Command {
 				Strategy string `json:"strategy"`
 			} `json:"tasks"`
 		}
-		json.Unmarshal(out, &result)
+		_ = json.Unmarshal(out, &result)
 
 		w := tabwriter.NewWriter(ctx.App.Out, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tTITLE\tSTATE\tSTRATEGY")
+		_, _ = fmt.Fprintln(w, "NAME\tTITLE\tSTATE\tSTRATEGY")
 		for _, t := range result.Tasks {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.Name, t.Title, t.State, t.Strategy)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.Name, t.Title, t.State, t.Strategy)
 		}
 		return w.Flush()
 	}

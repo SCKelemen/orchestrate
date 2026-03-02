@@ -166,7 +166,7 @@ func (d *Docker) Create(ctx context.Context, opts CreateOpts) (*Workspace, error
 
 	// Start the container
 	if err := d.dockerRun(ctx, "start", ws.ContainerID); err != nil {
-		d.Destroy(ctx, ws)
+		_ = d.Destroy(ctx, ws)
 		return nil, fmt.Errorf("docker start: %w", err)
 	}
 
@@ -174,14 +174,14 @@ func (d *Docker) Create(ctx context.Context, opts CreateOpts) (*Workspace, error
 	if opts.RepoURL != "" {
 		cloneCmd := []string{"git", "clone", "--branch", opts.BaseRef, "--single-branch", "--depth=1", opts.RepoURL, "."}
 		if _, err := d.Exec(ctx, ws, cloneCmd); err != nil {
-			d.Destroy(ctx, ws)
+			_ = d.Destroy(ctx, ws)
 			return nil, fmt.Errorf("git clone: %w", err)
 		}
 
 		// Create working branch
 		if opts.Branch != "" {
 			if _, err := d.Exec(ctx, ws, []string{"git", "checkout", "-b", opts.Branch}); err != nil {
-				d.Destroy(ctx, ws)
+				_ = d.Destroy(ctx, ws)
 				return nil, fmt.Errorf("git checkout: %w", err)
 			}
 		}
@@ -189,17 +189,17 @@ func (d *Docker) Create(ctx context.Context, opts CreateOpts) (*Workspace, error
 		if len(opts.VisibleRepoPaths) > 0 {
 			paths, err := sanitizeVisiblePaths(opts.VisibleRepoPaths)
 			if err != nil {
-				d.Destroy(ctx, ws)
+				_ = d.Destroy(ctx, ws)
 				return nil, err
 			}
 			if len(paths) > 0 {
 				if _, err := d.Exec(ctx, ws, []string{"git", "sparse-checkout", "init", "--cone"}); err != nil {
-					d.Destroy(ctx, ws)
+					_ = d.Destroy(ctx, ws)
 					return nil, fmt.Errorf("git sparse-checkout init: %w", err)
 				}
 				sparseCmd := append([]string{"git", "sparse-checkout", "set"}, paths...)
 				if _, err := d.Exec(ctx, ws, sparseCmd); err != nil {
-					d.Destroy(ctx, ws)
+					_ = d.Destroy(ctx, ws)
 					return nil, fmt.Errorf("git sparse-checkout set: %w", err)
 				}
 			}

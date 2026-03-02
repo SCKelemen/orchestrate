@@ -58,7 +58,7 @@ func LoadCredentials() (*Credentials, error) {
 		return nil, err
 	}
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		fmt.Fprintf(os.Stderr, "WARNING: credentials file %s has permissions %04o; should be 0600\n", path, perm)
+		_, _ = fmt.Fprintf(os.Stderr, "WARNING: credentials file %s has permissions %04o; should be 0600\n", path, perm)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -142,6 +142,6 @@ func refreshAccessToken(serverURL string, creds *Credentials) *Credentials {
 		creds.RefreshToken = result.RefreshToken
 	}
 	creds.ExpiresAt = time.Now().Add(time.Duration(result.ExpiresIn) * time.Second).Format(time.RFC3339)
-	SaveCredentials(creds)
+	_ = SaveCredentials(creds)
 	return creds
 }

@@ -115,8 +115,8 @@ func newSubmitCmd() *clix.Command {
 		}
 
 		var result map[string]any
-		json.Unmarshal(out, &result)
-		fmt.Fprintf(ctx.App.Out, "Created task: %s\n", result["name"])
+		_ = json.Unmarshal(out, &result)
+		_, _ = fmt.Fprintf(ctx.App.Out, "Created task: %s\n", result["name"])
 		return nil
 	}
 

@@ -153,7 +153,7 @@ func (o *Orchestrator) executeAgentsSequential(ctx context.Context, task *store.
 		}
 		return results
 	}
-	defer o.sandbox.Destroy(ctx, ws)
+	defer func() { _ = o.sandbox.Destroy(ctx, ws) }()
 
 	for i, plan := range plans {
 		plan.Branch = sharedBranch
@@ -183,23 +183,23 @@ func (o *Orchestrator) executeAgent(ctx context.Context, task *store.Task, plan 
 
 	backend, ag, err := o.resolveTaskAgent(task)
 	if err != nil {
-		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
+		_ = o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
 		return nil, err
 	}
 
 	createOpts, err := o.sandboxCreateOpts(task, plan.Branch, backend)
 	if err != nil {
-		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
+		_ = o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
 		return nil, err
 	}
 
 	// Create sandbox workspace
 	ws, err := o.sandbox.Create(ctx, createOpts)
 	if err != nil {
-		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
+		_ = o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
 		return nil, fmt.Errorf("create workspace: %w", err)
 	}
-	defer o.sandbox.Destroy(ctx, ws)
+	defer func() { _ = o.sandbox.Destroy(ctx, ws) }()
 
 	return o.runPlanInWorkspace(ctx, task, plan, runID, logPath, ws, ag)
 }
@@ -239,14 +239,14 @@ func (o *Orchestrator) resolveTaskAgent(task *store.Task) (string, agent.Agent, 
 }
 
 func (o *Orchestrator) runPlanInWorkspace(ctx context.Context, task *store.Task, plan AgentPlan, runID, logPath string, ws *sandbox.Workspace, ag agent.Agent) (*AgentResult, error) {
-	o.store.UpdateRunState(ctx, runID, store.RunRunning, nil, "")
+	_ = o.store.UpdateRunState(ctx, runID, store.RunRunning, nil, "")
 
 	result, err := ag.Run(ctx, ws, plan.Prompt, agent.RunOpts{
 		OutputFormat: "json",
 		LogPath:      logPath,
 	})
 	if err != nil {
-		o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
+		_ = o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), err.Error())
 		return nil, fmt.Errorf("agent run: %w", err)
 	}
 	if err := o.enforceManifestWritePolicy(ctx, ws, task); err != nil {
@@ -254,7 +254,7 @@ func (o *Orchestrator) runPlanInWorkspace(ctx context.Context, task *store.Task,
 		if exitCode == 0 {
 			exitCode = 1
 		}
-		o.store.UpdateRunState(ctx, runID, store.RunFailed, &exitCode, err.Error())
+		_ = o.store.UpdateRunState(ctx, runID, store.RunFailed, &exitCode, err.Error())
 		return nil, err
 	}
 
@@ -262,7 +262,7 @@ func (o *Orchestrator) runPlanInWorkspace(ctx context.Context, task *store.Task,
 	if result.ExitCode != 0 {
 		state = store.RunFailed
 	}
-	o.store.UpdateRunState(ctx, runID, state, &result.ExitCode, result.Output)
+	_ = o.store.UpdateRunState(ctx, runID, state, &result.ExitCode, result.Output)
 
 	return &AgentResult{
 		Index:    plan.Index,
@@ -491,7 +491,7 @@ func (o *Orchestrator) recordPlanFailure(ctx context.Context, task *store.Task, 
 	if err != nil {
 		return AgentResult{Index: plan.Index, ExitCode: 1, Output: fmt.Sprintf("%s; create run failed: %v", msg, err)}
 	}
-	o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), msg)
+	_ = o.store.UpdateRunState(ctx, runID, store.RunFailed, intPtr(1), msg)
 	return AgentResult{Index: plan.Index, RunID: runID, ExitCode: 1, Output: msg}
 }
 

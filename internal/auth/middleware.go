@@ -82,5 +82,5 @@ func (m *Middleware) Authenticate(r *http.Request) (*Identity, error) {
 func writeAuthError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	fmt.Fprintf(w, `{"error":{"code":%d,"message":"%s"}}`, code, msg)
+	_, _ = fmt.Fprintf(w, `{"error":{"code":%d,"message":"%s"}}`, code, msg)
 }

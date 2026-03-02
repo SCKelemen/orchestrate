@@ -176,7 +176,7 @@ func newServerCmd() *clix.Command {
 		}
 		go func() {
 			<-ctx.Done()
-			server.Close()
+			_ = server.Close()
 		}()
 
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

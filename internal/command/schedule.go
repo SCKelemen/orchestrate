@@ -138,10 +138,10 @@ func newScheduleCreateCmd() *clix.Command {
 		}
 
 		var result map[string]any
-		json.Unmarshal(out, &result)
-		fmt.Fprintf(ctx.App.Out, "Created schedule: %s\n", result["name"])
+		_ = json.Unmarshal(out, &result)
+		_, _ = fmt.Fprintf(ctx.App.Out, "Created schedule: %s\n", result["name"])
 		if next, ok := result["nextRunTime"].(string); ok {
-			fmt.Fprintf(ctx.App.Out, "Next run: %s\n", next)
+			_, _ = fmt.Fprintf(ctx.App.Out, "Next run: %s\n", next)
 		}
 		return nil
 	}
@@ -191,12 +191,12 @@ func newScheduleListCmd() *clix.Command {
 				RunCount     int    `json:"runCount"`
 			} `json:"schedules"`
 		}
-		json.Unmarshal(out, &result)
+		_ = json.Unmarshal(out, &result)
 
 		w := tabwriter.NewWriter(ctx.App.Out, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tTITLE\tSCHEDULE\tSTATE\tNEXT RUN\tRUNS")
+		_, _ = fmt.Fprintln(w, "NAME\tTITLE\tSCHEDULE\tSTATE\tNEXT RUN\tRUNS")
 		for _, sc := range result.Schedules {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n",
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n",
 				sc.Name, sc.Title, sc.ScheduleExpr, sc.State, sc.NextRunTime, sc.RunCount)
 		}
 		return w.Flush()
@@ -233,9 +233,9 @@ func newScheduleGetCmd() *clix.Command {
 		}
 
 		var sc map[string]any
-		json.Unmarshal(out, &sc)
+		_ = json.Unmarshal(out, &sc)
 		pretty, _ := json.MarshalIndent(sc, "", "  ")
-		fmt.Fprintln(ctx.App.Out, string(pretty))
+		_, _ = fmt.Fprintln(ctx.App.Out, string(pretty))
 		return nil
 	}
 
@@ -269,7 +269,7 @@ func newScheduleDeleteCmd() *clix.Command {
 			return fmt.Errorf("server returned %d: %s", resp.StatusCode, out)
 		}
 
-		fmt.Fprintf(ctx.App.Out, "Deleted schedule: schedules/%s\n", scheduleID)
+		_, _ = fmt.Fprintf(ctx.App.Out, "Deleted schedule: schedules/%s\n", scheduleID)
 		return nil
 	}
 
@@ -303,7 +303,7 @@ func newSchedulePauseCmd() *clix.Command {
 			return fmt.Errorf("server returned %d: %s", resp.StatusCode, out)
 		}
 
-		fmt.Fprintf(ctx.App.Out, "Paused schedule: schedules/%s\n", scheduleID)
+		_, _ = fmt.Fprintf(ctx.App.Out, "Paused schedule: schedules/%s\n", scheduleID)
 		return nil
 	}
 
@@ -338,10 +338,10 @@ func newScheduleResumeCmd() *clix.Command {
 		}
 
 		var result map[string]any
-		json.Unmarshal(out, &result)
-		fmt.Fprintf(ctx.App.Out, "Resumed schedule: schedules/%s\n", scheduleID)
+		_ = json.Unmarshal(out, &result)
+		_, _ = fmt.Fprintf(ctx.App.Out, "Resumed schedule: schedules/%s\n", scheduleID)
 		if next, ok := result["nextRunTime"].(string); ok {
-			fmt.Fprintf(ctx.App.Out, "Next run: %s\n", next)
+			_, _ = fmt.Fprintf(ctx.App.Out, "Next run: %s\n", next)
 		}
 		return nil
 	}

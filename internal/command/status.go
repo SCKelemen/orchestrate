@@ -37,9 +37,9 @@ func newStatusCmd() *clix.Command {
 		}
 
 		var task map[string]any
-		json.Unmarshal(out, &task)
+		_ = json.Unmarshal(out, &task)
 		pretty, _ := json.MarshalIndent(task, "", "  ")
-		fmt.Fprintln(ctx.App.Out, string(pretty))
+		_, _ = fmt.Fprintln(ctx.App.Out, string(pretty))
 		return nil
 	}
 

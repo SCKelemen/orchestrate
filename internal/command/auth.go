@@ -108,7 +108,7 @@ func loginWithToken(ctx *clix.Context, cc *ClientConfig, token string) error {
 		return fmt.Errorf("save credentials: %w", err)
 	}
 
-	fmt.Fprintf(ctx.App.Out, "Logged in as %s (provider: %s)\n", result.UserID, result.Provider)
+	_, _ = fmt.Fprintf(ctx.App.Out, "Logged in as %s (provider: %s)\n", result.UserID, result.Provider)
 	return nil
 }
 
@@ -130,7 +130,7 @@ func loginWithGitHub(ctx *clix.Context, cc *ClientConfig, token string) error {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		json.NewDecoder(resp.Body).Decode(&errResp)
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
 		return fmt.Errorf("login failed: %s", errResp.Error.Message)
 	}
 
@@ -158,7 +158,7 @@ func loginWithGitHub(ctx *clix.Context, cc *ClientConfig, token string) error {
 		return fmt.Errorf("save credentials: %w", err)
 	}
 
-	fmt.Fprintf(ctx.App.Out, "Logged in as %s (provider: %s)\n", result.UserID, result.Provider)
+	_, _ = fmt.Fprintf(ctx.App.Out, "Logged in as %s (provider: %s)\n", result.UserID, result.Provider)
 	return nil
 }
 
@@ -180,7 +180,7 @@ func loginWithGoogle(ctx *clix.Context, cc *ClientConfig, token string) error {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		json.NewDecoder(resp.Body).Decode(&errResp)
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
 		return fmt.Errorf("login failed: %s", errResp.Error.Message)
 	}
 
@@ -208,7 +208,7 @@ func loginWithGoogle(ctx *clix.Context, cc *ClientConfig, token string) error {
 		return fmt.Errorf("save credentials: %w", err)
 	}
 
-	fmt.Fprintf(ctx.App.Out, "Logged in as %s (provider: %s)\n", result.UserID, result.Provider)
+	_, _ = fmt.Fprintf(ctx.App.Out, "Logged in as %s (provider: %s)\n", result.UserID, result.Provider)
 	return nil
 }
 
@@ -223,7 +223,7 @@ func newAuthLogoutCmd() *clix.Command {
 		creds, err := LoadCredentials()
 		if err != nil {
 			// No credentials stored, nothing to do
-			fmt.Fprintln(ctx.App.Out, "Not logged in.")
+			_, _ = fmt.Fprintln(ctx.App.Out, "Not logged in.")
 			return nil
 		}
 
@@ -232,12 +232,12 @@ func newAuthLogoutCmd() *clix.Command {
 			body := fmt.Sprintf(`{"refresh_token":"%s"}`, creds.RefreshToken)
 			resp, err := apiRequest(cc.ServerURL, creds.AccessToken, "POST", "/v1/auth/token/:revoke", strings.NewReader(body))
 			if err == nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		}
 
-		DeleteCredentials()
-		fmt.Fprintln(ctx.App.Out, "Logged out.")
+		_ = DeleteCredentials()
+		_, _ = fmt.Fprintln(ctx.App.Out, "Logged out.")
 		return nil
 	}
 
@@ -251,21 +251,21 @@ func newAuthStatusCmd() *clix.Command {
 	cmd.Run = func(ctx *clix.Context) error {
 		creds, err := LoadCredentials()
 		if err != nil {
-			fmt.Fprintln(ctx.App.Out, "Not logged in.")
+			_, _ = fmt.Fprintln(ctx.App.Out, "Not logged in.")
 			return nil
 		}
 
-		fmt.Fprintf(ctx.App.Out, "Server:   %s\n", creds.Server)
-		fmt.Fprintf(ctx.App.Out, "User:     %s\n", creds.UserID)
-		fmt.Fprintf(ctx.App.Out, "Provider: %s\n", creds.Provider)
+		_, _ = fmt.Fprintf(ctx.App.Out, "Server:   %s\n", creds.Server)
+		_, _ = fmt.Fprintf(ctx.App.Out, "User:     %s\n", creds.UserID)
+		_, _ = fmt.Fprintf(ctx.App.Out, "Provider: %s\n", creds.Provider)
 
 		if creds.ExpiresAt != "" {
 			exp, err := time.Parse(time.RFC3339, creds.ExpiresAt)
 			if err == nil {
 				if time.Now().After(exp) {
-					fmt.Fprintln(ctx.App.Out, "Token:    expired")
+					_, _ = fmt.Fprintln(ctx.App.Out, "Token:    expired")
 				} else {
-					fmt.Fprintf(ctx.App.Out, "Token:    valid (expires %s)\n", exp.Format(time.RFC3339))
+					_, _ = fmt.Fprintf(ctx.App.Out, "Token:    valid (expires %s)\n", exp.Format(time.RFC3339))
 				}
 			}
 		}
@@ -285,7 +285,7 @@ func newAuthTokenCmd() *clix.Command {
 		if err != nil {
 			return fmt.Errorf("not logged in")
 		}
-		fmt.Fprint(ctx.App.Out, creds.AccessToken)
+		_, _ = fmt.Fprint(ctx.App.Out, creds.AccessToken)
 		return nil
 	}
 
@@ -343,22 +343,22 @@ func loginWithBrowser(ctx *clix.Context, cc *ClientConfig) error {
 		}
 		codeCh <- code
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Login successful!</h2><p>You can close this tab.</p><script>window.close()</script></body></html>`)
+		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Login successful!</h2><p>You can close this tab.</p><script>window.close()</script></body></html>`)
 	})
 
 	server := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	go server.Serve(listener)
-	defer server.Shutdown(context.Background())
+	go func() { _ = server.Serve(listener) }()
+	defer func() { _ = server.Shutdown(context.Background()) }()
 
 	// Build authorization URL and open browser
 	authURL := fmt.Sprintf("%s/v1/auth/authorize?response_type=code&client_id=cli&redirect_uri=%s&code_challenge=%s&code_challenge_method=S256&state=%s",
 		cc.ServerURL, redirectURI, challenge, state)
 
-	fmt.Fprintf(ctx.App.Out, "Opening browser to login...\n")
-	fmt.Fprintf(ctx.App.Out, "If browser doesn't open, visit: %s\n", authURL)
+	_, _ = fmt.Fprintf(ctx.App.Out, "Opening browser to login...\n")
+	_, _ = fmt.Fprintf(ctx.App.Out, "If browser doesn't open, visit: %s\n", authURL)
 	openBrowser(authURL)
 
 	// Wait for callback (with timeout)
@@ -389,7 +389,7 @@ func loginWithBrowser(ctx *clix.Context, cc *ClientConfig) error {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		json.NewDecoder(resp.Body).Decode(&errResp)
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
 		return fmt.Errorf("token exchange failed: %s", errResp.Error.Message)
 	}
 
@@ -417,7 +417,7 @@ func loginWithBrowser(ctx *clix.Context, cc *ClientConfig) error {
 		return fmt.Errorf("save credentials: %w", err)
 	}
 
-	fmt.Fprintf(ctx.App.Out, "Logged in as %s (provider: %s)\n", result.UserID, result.Provider)
+	_, _ = fmt.Fprintf(ctx.App.Out, "Logged in as %s (provider: %s)\n", result.UserID, result.Provider)
 	return nil
 }
 
@@ -436,7 +436,7 @@ func loginWithDevice(ctx *clix.Context, cc *ClientConfig) error {
 		var errResp struct {
 			Error struct{ Message string } `json:"error"`
 		}
-		json.NewDecoder(resp.Body).Decode(&errResp)
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
 		return fmt.Errorf("device authorization failed: %s", errResp.Error.Message)
 	}
 
@@ -452,9 +452,9 @@ func loginWithDevice(ctx *clix.Context, cc *ClientConfig) error {
 		return fmt.Errorf("decode response: %w", err)
 	}
 
-	fmt.Fprintf(ctx.App.Out, "\nTo authorize this device, visit:\n  %s\n\n", deviceResp.VerificationURI)
-	fmt.Fprintf(ctx.App.Out, "And enter code: %s\n\n", deviceResp.UserCode)
-	fmt.Fprintln(ctx.App.Out, "Waiting for authorization...")
+	_, _ = fmt.Fprintf(ctx.App.Out, "\nTo authorize this device, visit:\n  %s\n\n", deviceResp.VerificationURI)
+	_, _ = fmt.Fprintf(ctx.App.Out, "And enter code: %s\n\n", deviceResp.UserCode)
+	_, _ = fmt.Fprintln(ctx.App.Out, "Waiting for authorization...")
 
 	// Try to open browser with pre-filled code
 	openBrowser(deviceResp.VerificationURIComplete)
@@ -476,7 +476,7 @@ func loginWithDevice(ctx *clix.Context, cc *ClientConfig) error {
 		}
 
 		respBody, _ := io.ReadAll(pollResp.Body)
-		pollResp.Body.Close()
+		_ = pollResp.Body.Close()
 
 		if pollResp.StatusCode == http.StatusOK {
 			// Success!
@@ -504,7 +504,7 @@ func loginWithDevice(ctx *clix.Context, cc *ClientConfig) error {
 				return fmt.Errorf("save credentials: %w", err)
 			}
 
-			fmt.Fprintf(ctx.App.Out, "\nLogged in as %s (provider: %s)\n", result.UserID, result.Provider)
+			_, _ = fmt.Fprintf(ctx.App.Out, "\nLogged in as %s (provider: %s)\n", result.UserID, result.Provider)
 			return nil
 		}
 
@@ -512,7 +512,7 @@ func loginWithDevice(ctx *clix.Context, cc *ClientConfig) error {
 		var errResult struct {
 			Error string `json:"error"`
 		}
-		json.Unmarshal(respBody, &errResult)
+		_ = json.Unmarshal(respBody, &errResult)
 
 		switch errResult.Error {
 		case "authorization_pending":
@@ -543,10 +543,10 @@ func newRandomState() (string, error) {
 func openBrowser(url string) {
 	switch runtime.GOOS {
 	case "darwin":
-		exec.Command("open", url).Start()
+		_ = exec.Command("open", url).Start()
 	case "linux":
-		exec.Command("xdg-open", url).Start()
+		_ = exec.Command("xdg-open", url).Start()
 	case "windows":
-		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	}
 }

@@ -158,9 +158,9 @@ func (sc *Scheduler) checkSchedules(ctx context.Context) {
 		}
 		next := spec.Next(now)
 		if next.IsZero() {
-			sc.store.AdvanceSchedule(ctx, sched.ID, now, nil)
+			_ = sc.store.AdvanceSchedule(ctx, sched.ID, now, nil)
 		} else {
-			sc.store.AdvanceSchedule(ctx, sched.ID, now, &next)
+			_ = sc.store.AdvanceSchedule(ctx, sched.ID, now, &next)
 		}
 
 		sc.logger.Info("scheduled task created", "schedule", sched.ID, "task", taskID, "nextRun", next)
